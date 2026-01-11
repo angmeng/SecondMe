@@ -24,7 +24,6 @@ services:
       - "6379:6379"
     volumes:
       - falkordb_data:/data
-      - ./specs/001-personal-ai-clone/contracts/graph-schema.cypher:/docker-entrypoint-initdb.d/init-schema.cypher
     environment:
       - FALKORDB_ARGS=--requirepass ${FALKORDB_PASSWORD:-falkordb_default_password}
     healthcheck:
