@@ -2,19 +2,11 @@
 // SecondMe Personal AI Clone - Knowledge Graph Structure
 
 // ============================================================================
-// CONSTRAINTS & INDEXES
+// INDEXES
 // ============================================================================
+// Note: FalkorDB constraints require GRAPH.CONSTRAINT command (handled separately)
+// Indexes are created via Cypher
 
-// Create uniqueness constraints
-CREATE CONSTRAINT ON (u:User) ASSERT u.id IS UNIQUE;
-CREATE CONSTRAINT ON (c:Contact) ASSERT c.id IS UNIQUE;
-CREATE CONSTRAINT ON (p:Persona) ASSERT p.id IS UNIQUE;
-CREATE CONSTRAINT ON (per:Person) ASSERT per.id IS UNIQUE;
-CREATE CONSTRAINT ON (comp:Company) ASSERT comp.id IS UNIQUE;
-CREATE CONSTRAINT ON (e:Event) ASSERT e.id IS UNIQUE;
-CREATE CONSTRAINT ON (t:Topic) ASSERT t.id IS UNIQUE;
-
-// Create indexes for frequent queries
 CREATE INDEX ON :Contact(phoneNumber);
 CREATE INDEX ON :Person(name);
 CREATE INDEX ON :Company(name);
@@ -31,8 +23,8 @@ CREATE (u:User {
   defaultPersona: 'persona-professional',
   sleepHoursStart: '23:00:00',
   sleepHoursEnd: '07:00:00',
-  createdAt: datetime(),
-  updatedAt: datetime()
+  createdAt: timestamp(),
+  updatedAt: timestamp()
 });
 
 // ============================================================================
@@ -42,7 +34,7 @@ CREATE (u:User {
 CREATE (p1:Persona {
   id: 'persona-professional',
   name: 'Professional Colleague',
-  styleGuide: 'Use formal language. Address people by title. Keep messages concise and to-the-point. Avoid emojis. Use proper grammar and punctuation. Example: "Thank you for reaching out. I''ll review the document and get back to you by EOD tomorrow."',
+  styleGuide: "Use formal language. Address people by title. Keep messages concise and to-the-point. Avoid emojis. Use proper grammar and punctuation. Example: Thank you for reaching out. I'll review the document and get back to you by EOD tomorrow.",
   tone: 'formal',
   exampleMessages: [
     'I appreciate your patience on this matter.',
@@ -50,38 +42,38 @@ CREATE (p1:Persona {
     'Could you please send over the relevant documentation?'
   ],
   applicableTo: ['colleague', 'client', 'manager'],
-  createdAt: datetime(),
-  updatedAt: datetime()
+  createdAt: timestamp(),
+  updatedAt: timestamp()
 });
 
 CREATE (p2:Persona {
   id: 'persona-casual',
   name: 'Casual Friend',
-  styleGuide: 'Use informal language. Emojis are okay but not excessive. Contractions are fine (it''s, don''t, can''t). Conversational tone. Example: "Hey! Yeah I''m down for that. Let me know what time works 😊"',
+  styleGuide: "Use informal language. Emojis are okay but not excessive. Contractions are fine (it's, don't, can't). Conversational tone. Example: Hey! Yeah I'm down for that. Let me know what time works.",
   tone: 'casual',
   exampleMessages: [
-    'Haha yeah that''s hilarious 😂',
-    'Sounds good! I''m free this weekend',
+    "Haha yeah that's hilarious",
+    "Sounds good! I'm free this weekend",
     'No worries, catch you later!'
   ],
   applicableTo: ['friend', 'acquaintance'],
-  createdAt: datetime(),
-  updatedAt: datetime()
+  createdAt: timestamp(),
+  updatedAt: timestamp()
 });
 
 CREATE (p3:Persona {
   id: 'persona-family',
   name: 'Family Member',
-  styleGuide: 'Warm and affectionate. Use familiar terms. More emojis okay. Longer responses acceptable. Show interest and care. Example: "Miss you too! ❤️ How''s work been? Tell me all about it!"',
+  styleGuide: "Warm and affectionate. Use familiar terms. More emojis okay. Longer responses acceptable. Show interest and care. Example: Miss you too! How's work been? Tell me all about it!",
   tone: 'friendly',
   exampleMessages: [
-    'Love you! Talk soon ❤️',
-    'Can''t wait to see you at the reunion!',
-    'How''s everyone doing? Give them my love!'
+    'Love you! Talk soon',
+    "Can't wait to see you at the reunion!",
+    "How's everyone doing? Give them my love!"
   ],
   applicableTo: ['family'],
-  createdAt: datetime(),
-  updatedAt: datetime()
+  createdAt: timestamp(),
+  updatedAt: timestamp()
 });
 
 // Link personas to user
@@ -105,9 +97,9 @@ CREATE (c:Contact {
   relationshipType: 'colleague',
   botEnabled: false,
   assignedPersona: 'persona-professional',
-  lastInteraction: datetime(),
-  createdAt: datetime(),
-  updatedAt: datetime()
+  lastInteraction: timestamp(),
+  createdAt: timestamp(),
+  updatedAt: timestamp()
 });
 
 CREATE (per:Person {
@@ -116,17 +108,17 @@ CREATE (per:Person {
   occupation: 'Software Engineer',
   location: 'San Francisco, CA',
   notes: 'Works on ML infrastructure. Mentioned working on LLM fine-tuning project.',
-  createdAt: datetime(),
-  lastMentioned: datetime()
+  createdAt: timestamp(),
+  lastMentioned: timestamp()
 });
 
 CREATE (comp:Company {
   id: 'company_google',
   name: 'Google',
   industry: 'Tech',
-  notes: 'John''s current employer. Mentioned recent project launch.',
-  createdAt: datetime(),
-  lastMentioned: datetime()
+  notes: "John's current employer. Mentioned recent project launch.",
+  createdAt: timestamp(),
+  lastMentioned: timestamp()
 });
 
 // Create relationships
@@ -147,21 +139,21 @@ CREATE (t1:Topic {
   id: 'topic_ml',
   name: 'Machine Learning',
   category: 'Technology',
-  createdAt: datetime(),
-  lastMentioned: datetime()
+  createdAt: timestamp(),
+  lastMentioned: timestamp()
 });
 
 CREATE (t2:Topic {
   id: 'topic_travel',
   name: 'Travel',
   category: 'Lifestyle',
-  createdAt: datetime(),
-  lastMentioned: datetime()
+  createdAt: timestamp(),
+  lastMentioned: timestamp()
 });
 
 MATCH (c:Contact {id: 'contact_example1'})
 MATCH (t1:Topic {id: 'topic_ml'})
-CREATE (c)-[:MENTIONED {times: 5, lastMentioned: datetime()}]->(t1);
+CREATE (c)-[:MENTIONED {times: 5, lastMentioned: timestamp()}]->(t1);
 
 // ============================================================================
 // COMMON QUERY PATTERNS (for reference)
@@ -192,7 +184,7 @@ CREATE (c)-[:MENTIONED {times: 5, lastMentioned: datetime()}]->(t1);
 // LIMIT 5;
 
 // Query 5: Add new entity and relationship
-// CREATE (p:Person {id: $id, name: $name, occupation: $occupation, createdAt: datetime(), lastMentioned: datetime()})
+// CREATE (p:Person {id: $id, name: $name, occupation: $occupation, createdAt: timestamp(), lastMentioned: timestamp()})
 // WITH p
 // MATCH (c:Contact {id: $contactId})
 // CREATE (c)-[:KNOWS]->(p)

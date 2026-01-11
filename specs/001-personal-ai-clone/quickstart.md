@@ -130,10 +130,35 @@ Verify schema:
 # Connect to FalkorDB
 docker exec -it $(docker ps -qf "name=falkordb") redis-cli
 
+# Authentication
+AUTH falkordb_default_password
+
 # Run query
 GRAPH.QUERY knowledge_graph "MATCH (u:User) RETURN u"
 
 # Expected: User node with id='user-1'
+# 1) 1) "u"
+# 2) 1) 1) 1) 1) "id"
+#             2) (integer) 0
+#          2) 1) "labels"
+#             2) 1) "User"
+#          3) 1) "properties"
+#             2) 1) 1) "id"
+#                   2) "user-1"
+#                2) 1) "phoneNumber"
+#                   2) "+PLACEHOLDER"
+#                3) 1) "defaultPersona"
+#                   2) "persona-professional"
+#                4) 1) "sleepHoursStart"
+#                   2) "23:00:00"
+#                5) 1) "sleepHoursEnd"
+#                   2) "07:00:00"
+#                6) 1) "createdAt"
+#                   2) (integer) 1768141371203
+#                7) 1) "updatedAt"
+#                   2) (integer) 1768141371203
+# 3) 1) "Cached execution: 0"
+#    2) "Query internal execution time: 3.047417 milliseconds"
 ```
 
 ### 6. Start Backend Services
