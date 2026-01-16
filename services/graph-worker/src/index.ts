@@ -14,9 +14,11 @@ config({ path: resolve(__dirname, '../../../.env') });
 
 import { redisClient } from './redis/client.js';
 import { falkordbClient } from './falkordb/client.js';
+import { startConsumer, stopConsumer } from './redis/consumer.js';
 
 const SERVICE_NAME = 'Graph Worker';
 const CHAT_HISTORY_QUEUE = 'QUEUE:chat_history';
+const USE_NEW_CONSUMER = process.env['USE_NEW_CONSUMER'] !== 'false'; // Enable new consumer by default
 
 async function startGraphWorkerService() {
   console.log(`[${SERVICE_NAME}] Starting Graph Worker Service...`);
@@ -31,10 +33,16 @@ async function startGraphWorkerService() {
     await falkordbClient.connect();
 
     console.log(`[${SERVICE_NAME}] Graph Worker Service started successfully`);
-    console.log(`[${SERVICE_NAME}] Listening for chat history on ${CHAT_HISTORY_QUEUE}...`);
 
-    // Start processing chat history queue
-    await processChatHistoryQueue();
+    if (USE_NEW_CONSUMER) {
+      // Use the new consumer with entity extraction
+      console.log(`[${SERVICE_NAME}] Starting new consumer with entity extraction...`);
+      await startConsumer('both');
+    } else {
+      // Legacy consumer
+      console.log(`[${SERVICE_NAME}] Listening for chat history on ${CHAT_HISTORY_QUEUE}...`);
+      await processChatHistoryQueue();
+    }
   } catch (error) {
     console.error(`[${SERVICE_NAME}] Failed to start service:`, error);
     process.exit(1);
@@ -108,6 +116,9 @@ async function shutdown() {
   console.log(`[${SERVICE_NAME}] Shutting down gracefully...`);
 
   try {
+    // Stop the consumer if running
+    stopConsumer();
+
     await redisClient.quit();
     await falkordbClient.quit();
     console.log(`[${SERVICE_NAME}] All connections closed`);

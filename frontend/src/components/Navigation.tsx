@@ -5,10 +5,11 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { socketClient } from '@/lib/socket';
+import { useToast } from '@/contexts/ToastContext';
 
 interface NavItem {
   href: string;
@@ -63,11 +64,17 @@ const navItems: NavItem[] = [
 
 type ConnectionStatus = 'disconnected' | 'qr' | 'connected' | 'ready';
 
+const DISCONNECTION_TOAST_ID = 'whatsapp-disconnected';
+
 export default function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { toast, dismiss } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const initialStatus = socketClient.getLastConnectionStatus();
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(initialStatus);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const prevStatusRef = useRef<ConnectionStatus>(initialStatus);
 
   useEffect(() => {
     // Check for dark mode preference
@@ -91,14 +98,38 @@ export default function Navigation() {
     darkModeMediaQuery.addEventListener('change', handleChange);
 
     // Subscribe to connection status
-    socketClient.onConnectionStatus((data) => {
+    const handleConnectionStatus = (data: { status: ConnectionStatus }) => {
+      // Detect transition from 'ready' to 'disconnected'
+      if (prevStatusRef.current === 'ready' && data.status === 'disconnected') {
+        toast({
+          id: DISCONNECTION_TOAST_ID,
+          variant: 'error',
+          title: 'WhatsApp Disconnected',
+          description: 'Your session was logged out from your device',
+          action: {
+            label: 'Reconnect',
+            onClick: () => router.push('/auth'),
+          },
+          duration: 0, // persistent until dismissed
+        });
+      }
+
+      // Auto-dismiss when reconnected
+      if (data.status === 'ready') {
+        dismiss(DISCONNECTION_TOAST_ID);
+      }
+
+      prevStatusRef.current = data.status;
       setConnectionStatus(data.status);
-    });
+    };
+
+    socketClient.onConnectionStatus(handleConnectionStatus);
 
     return () => {
       darkModeMediaQuery.removeEventListener('change', handleChange);
+      socketClient.offConnectionStatus(handleConnectionStatus);
     };
-  }, []);
+  }, [toast, dismiss, router]);
 
   function toggleDarkMode() {
     setIsDarkMode(!isDarkMode);
@@ -169,19 +200,24 @@ export default function Navigation() {
           <nav className="flex-1 space-y-1 px-2 py-4">
             {navItems.map((item) => {
               const isActive = pathname === item.href;
+              const isAuthDisabled = item.href === '/auth' && connectionStatus === 'ready';
               return (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={isAuthDisabled ? '#' : item.href}
+                  onClick={(e) => isAuthDisabled && e.preventDefault()}
+                  title={isAuthDisabled ? 'Already connected' : undefined}
                   className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200 ${
-                    isActive
-                      ? 'bg-primary-50 text-primary-600 dark:bg-primary-950/50 dark:text-primary-400'
-                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
+                    isAuthDisabled
+                      ? 'opacity-50 cursor-not-allowed text-slate-400 dark:text-slate-500'
+                      : isActive
+                        ? 'bg-primary-50 text-primary-600 dark:bg-primary-950/50 dark:text-primary-400'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white'
                   }`}
                 >
                   <span
                     className={`flex-shrink-0 ${
-                      isActive ? 'text-primary-600 dark:text-primary-400' : ''
+                      isActive && !isAuthDisabled ? 'text-primary-600 dark:text-primary-400' : ''
                     }`}
                   >
                     {item.icon}
@@ -193,7 +229,7 @@ export default function Navigation() {
                   >
                     {item.label}
                   </span>
-                  {isActive && (
+                  {isActive && !isAuthDisabled && (
                     <span className="absolute left-0 h-8 w-1 rounded-r-full bg-primary-500" />
                   )}
                 </Link>
@@ -267,19 +303,24 @@ export default function Navigation() {
         <div className="mx-auto flex h-16 max-w-md items-center justify-around px-4">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
+            const isAuthDisabled = item.href === '/auth' && connectionStatus === 'ready';
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={isAuthDisabled ? '#' : item.href}
+                onClick={(e) => isAuthDisabled && e.preventDefault()}
+                title={isAuthDisabled ? 'Already connected' : undefined}
                 className={`flex flex-1 flex-col items-center gap-1 py-2 transition-colors ${
-                  isActive
-                    ? 'text-primary-600 dark:text-primary-400'
-                    : 'text-slate-500 dark:text-slate-400'
+                  isAuthDisabled
+                    ? 'opacity-50 cursor-not-allowed text-slate-400 dark:text-slate-500'
+                    : isActive
+                      ? 'text-primary-600 dark:text-primary-400'
+                      : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
                 {item.icon}
                 <span className="text-[10px] font-medium">{item.label}</span>
-                {isActive && (
+                {isActive && !isAuthDisabled && (
                   <span className="absolute top-0 h-0.5 w-12 rounded-b-full bg-primary-500" />
                 )}
               </Link>

@@ -62,8 +62,10 @@ io.on('connection', (socket) => {
   console.log(`[Gateway] Client connected: ${socket.id}`);
 
   // Send current connection status on connect
+  // Use whatsappClient.isReady() as primary source of truth to handle race condition
+  // where authHandler may be created after WhatsApp 'ready' event fires
   socket.emit('connection_status', {
-    status: authHandler?.getStatus() || 'disconnected',
+    status: whatsappClient.isReady() ? 'ready' : (authHandler?.getStatus() || 'disconnected'),
     timestamp: Date.now(),
   });
 

@@ -17,11 +17,16 @@ export default function ContactsPage() {
   useEffect(() => {
     const socket = socketClient.getSocket();
 
-    socketClient.onConnectionStatus((data) => {
+    const handleConnectionStatus = (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => {
       setIsConnected(data.status === 'ready' || data.status === 'connected');
-    });
+    };
 
+    socketClient.onConnectionStatus(handleConnectionStatus);
     setIsConnected(socket.connected);
+
+    return () => {
+      socketClient.offConnectionStatus(handleConnectionStatus);
+    };
   }, []);
 
   return (

@@ -27,7 +27,12 @@ export default function ContactList() {
 
   useEffect(() => {
     // Subscribe to pause updates
-    socketClient.onPauseUpdate((data) => {
+    const handlePauseUpdate = (data: {
+      contactId: string;
+      action: 'pause' | 'resume';
+      reason?: string;
+      expiresAt?: number;
+    }) => {
       console.log('[ContactList] Pause update:', data);
 
       setContacts((prev) =>
@@ -43,10 +48,16 @@ export default function ContactList() {
           return contact;
         })
       );
-    });
+    };
+
+    socketClient.onPauseUpdate(handlePauseUpdate);
 
     // Load contacts (placeholder - will be implemented with real WhatsApp contact fetching)
     loadPlaceholderContacts();
+
+    return () => {
+      socketClient.offPauseUpdate(handlePauseUpdate);
+    };
   }, []);
 
   function loadPlaceholderContacts() {
