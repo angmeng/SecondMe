@@ -3,9 +3,10 @@
  * Defines the HTML structure and global styles for the entire application
  */
 
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import '@/styles/globals.css';
+import Navigation from '@/components/Navigation';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -26,11 +27,6 @@ export const metadata: Metadata = {
     'dashboard',
   ],
   authors: [{ name: 'SecondMe' }],
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1,
-  },
   icons: {
     icon: '/favicon.ico',
   },
@@ -40,17 +36,26 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="min-h-screen bg-gray-50 antialiased dark:bg-gray-900">
-        <div className="flex min-h-screen flex-col">
-          {/* Global navigation will go here in future user stories */}
-          <main className="flex-1">{children}</main>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="min-h-screen antialiased">
+        <div className="flex min-h-screen">
+          <Navigation />
+          {/* Main content area - offset for sidebar on desktop, bottom nav on mobile */}
+          <main className="flex-1 pb-20 lg:ml-16 lg:pb-0">
+            {children}
+          </main>
         </div>
       </body>
     </html>

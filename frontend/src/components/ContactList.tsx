@@ -1,12 +1,15 @@
 /**
  * Contact List Component
- * Displays contacts with bot enable/disable toggles
+ * Displays contacts with bot enable/disable toggles and enhanced UI
  */
 
 'use client';
 
 import { useState, useEffect } from 'react';
 import { socketClient } from '@/lib/socket';
+import Avatar from '@/components/ui/Avatar';
+import { SkeletonCard } from '@/components/ui/Skeleton';
+import { EmptyStateNoContacts } from '@/components/ui/EmptyState';
 
 interface Contact {
   id: string;
@@ -20,6 +23,7 @@ export default function ContactList() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingContactId, setLoadingContactId] = useState<string | null>(null);
 
   useEffect(() => {
     // Subscribe to pause updates
@@ -46,32 +50,35 @@ export default function ContactList() {
   }, []);
 
   function loadPlaceholderContacts() {
-    // Placeholder contacts for MVP
-    // In production, this would fetch from WhatsApp via Gateway
-    const placeholderContacts: Contact[] = [
-      {
-        id: '1234567890@c.us',
-        name: 'John Doe',
-        isPaused: false,
-      },
-      {
-        id: '0987654321@c.us',
-        name: 'Jane Smith',
-        isPaused: false,
-      },
-      {
-        id: '5555555555@c.us',
-        name: 'Test Contact',
-        isPaused: true,
-        pauseReason: 'manual',
-      },
-    ];
+    // Simulate loading delay
+    setTimeout(() => {
+      const placeholderContacts: Contact[] = [
+        {
+          id: '1234567890@c.us',
+          name: 'John Doe',
+          isPaused: false,
+        },
+        {
+          id: '0987654321@c.us',
+          name: 'Jane Smith',
+          isPaused: false,
+        },
+        {
+          id: '5555555555@c.us',
+          name: 'Test Contact',
+          isPaused: true,
+          pauseReason: 'manual',
+        },
+      ];
 
-    setContacts(placeholderContacts);
-    setIsLoading(false);
+      setContacts(placeholderContacts);
+      setIsLoading(false);
+    }, 800);
   }
 
   async function toggleContact(contactId: string, currentlyPaused: boolean) {
+    setLoadingContactId(contactId);
+
     try {
       if (currentlyPaused) {
         // Resume (clear pause)
@@ -121,83 +128,155 @@ export default function ContactList() {
       console.error('[ContactList] Error toggling contact:', err);
       setError(err.message || 'Failed to toggle contact');
       setTimeout(() => setError(null), 3000);
+    } finally {
+      setLoadingContactId(null);
     }
   }
 
+  function formatTimeRemaining(expiresAt: number): string {
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) return 'Expired';
+
+    const minutes = Math.floor(remaining / 60000);
+    if (minutes < 60) return `${minutes}m remaining`;
+
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ${minutes % 60}m remaining`;
+  }
+
+  // Loading state with skeleton
   if (isLoading) {
     return (
-      <div className="card flex items-center justify-center py-12">
-        <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-300 border-t-primary-600"></div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {[1, 2, 3].map((i) => (
+          <SkeletonCard key={i} />
+        ))}
       </div>
     );
   }
 
+  // Empty state
   if (contacts.length === 0) {
-    return (
-      <div className="card text-center">
-        <p className="text-gray-600 dark:text-gray-400">No contacts found</p>
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
-          Make sure WhatsApp is connected
-        </p>
-      </div>
-    );
+    return <EmptyStateNoContacts />;
   }
 
   return (
     <div className="space-y-4">
+      {/* Error notification */}
       {error && (
-        <div className="rounded-lg border border-error bg-error-light/10 p-4">
-          <p className="text-sm text-error-dark">{error}</p>
+        <div className="animate-fade-in rounded-lg border border-error-200 bg-error-50 p-4 dark:border-error-900/50 dark:bg-error-900/20">
+          <div className="flex items-center gap-3">
+            <svg
+              className="h-5 w-5 flex-shrink-0 text-error-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <p className="text-sm text-error-700 dark:text-error-300">{error}</p>
+          </div>
         </div>
       )}
 
+      {/* Contact grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {contacts.map((contact) => (
-          <div key={contact.id} className="card">
+        {contacts.map((contact, index) => (
+          <div
+            key={contact.id}
+            className="card card-interactive group animate-fade-in-up"
+            style={{ animationDelay: `${index * 50}ms` }}
+          >
             <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {contact.name}
-                </h3>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
-                  {contact.id.replace('@c.us', '')}
-                </p>
+              {/* Contact info */}
+              <div className="flex items-center gap-3">
+                <Avatar
+                  name={contact.name}
+                  size="lg"
+                  status={contact.isPaused ? 'offline' : 'online'}
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate font-semibold text-slate-900 dark:text-white">
+                    {contact.name}
+                  </h3>
+                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                    {contact.id.replace('@c.us', '')}
+                  </p>
 
-                {/* Status Badge */}
-                <div className="mt-2">
-                  {contact.isPaused ? (
-                    <span className="badge badge-error">
-                      Paused
-                      {contact.pauseReason && ` (${contact.pauseReason})`}
-                    </span>
-                  ) : (
-                    <span className="badge badge-success">Active</span>
+                  {/* Status Badge */}
+                  <div className="mt-2">
+                    {contact.isPaused ? (
+                      <span className="badge badge-error badge-dot">
+                        Paused
+                        {contact.pauseReason && contact.pauseReason !== 'manual' && (
+                          <span className="ml-1 opacity-70">({contact.pauseReason})</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="badge badge-success badge-dot">Active</span>
+                    )}
+                  </div>
+
+                  {/* Expiration countdown */}
+                  {contact.expiresAt && contact.expiresAt > Date.now() && (
+                    <p className="mt-1.5 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                      {formatTimeRemaining(contact.expiresAt)}
+                    </p>
                   )}
                 </div>
-
-                {/* Expiration */}
-                {contact.expiresAt && contact.expiresAt > Date.now() && (
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
-                    Expires:{' '}
-                    {new Date(contact.expiresAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </p>
-                )}
               </div>
 
               {/* Toggle Button */}
               <button
                 onClick={() => toggleContact(contact.id, contact.isPaused)}
-                className={`ml-4 rounded-full p-2 transition-colors ${
-                  contact.isPaused
-                    ? 'bg-error/10 text-error hover:bg-error/20'
-                    : 'bg-success/10 text-success hover:bg-success/20'
-                }`}
-                aria-label={contact.isPaused ? 'Resume bot' : 'Pause bot'}
+                disabled={loadingContactId === contact.id}
+                className={`
+                  flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full
+                  transition-all duration-200
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+                  ${
+                    contact.isPaused
+                      ? 'bg-error-100 text-error-600 hover:bg-error-200 focus-visible:ring-error-500 dark:bg-error-900/30 dark:text-error-400 dark:hover:bg-error-900/50'
+                      : 'bg-success-100 text-success-600 hover:bg-success-200 focus-visible:ring-success-500 dark:bg-success-900/30 dark:text-success-400 dark:hover:bg-success-900/50'
+                  }
+                  ${loadingContactId === contact.id ? 'opacity-50 cursor-wait' : ''}
+                `}
+                aria-label={contact.isPaused ? 'Resume bot for this contact' : 'Pause bot for this contact'}
               >
-                {contact.isPaused ? (
+                {loadingContactId === contact.id ? (
+                  <svg
+                    className="h-5 w-5 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                ) : contact.isPaused ? (
                   <svg
                     className="h-5 w-5"
                     fill="none"
@@ -233,6 +312,15 @@ export default function ContactList() {
                   </svg>
                 )}
               </button>
+            </div>
+
+            {/* Hover action hint */}
+            <div className="mt-3 border-t border-slate-100 pt-3 opacity-0 transition-opacity group-hover:opacity-100 dark:border-slate-700">
+              <p className="text-xs text-slate-400">
+                {contact.isPaused
+                  ? 'Click to resume automated responses'
+                  : 'Click to pause automated responses for 1 hour'}
+              </p>
             </div>
           </div>
         ))}
