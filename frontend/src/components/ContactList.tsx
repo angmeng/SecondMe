@@ -11,7 +11,7 @@ import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { EmptyStateNoContacts } from '@/components/ui/EmptyState';
 
-interface Contact {
+export interface Contact {
   id: string;
   name: string;
   isPaused: boolean;
@@ -19,14 +19,18 @@ interface Contact {
   expiresAt?: number;
 }
 
-export default function ContactList() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+interface ContactListProps {
+  contacts: Contact[];
+  setContacts: React.Dispatch<React.SetStateAction<Contact[]>>;
+  isLoading: boolean;
+}
+
+export default function ContactList({ contacts, setContacts, isLoading }: ContactListProps) {
   const [error, setError] = useState<string | null>(null);
   const [loadingContactId, setLoadingContactId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Subscribe to pause updates
+    // Subscribe to pause updates for real-time state sync
     const handlePauseUpdate = (data: {
       contactId: string;
       action: 'pause' | 'resume';
@@ -52,40 +56,10 @@ export default function ContactList() {
 
     socketClient.onPauseUpdate(handlePauseUpdate);
 
-    // Load contacts (placeholder - will be implemented with real WhatsApp contact fetching)
-    loadPlaceholderContacts();
-
     return () => {
       socketClient.offPauseUpdate(handlePauseUpdate);
     };
-  }, []);
-
-  function loadPlaceholderContacts() {
-    // Simulate loading delay
-    setTimeout(() => {
-      const placeholderContacts: Contact[] = [
-        {
-          id: '1234567890@c.us',
-          name: 'John Doe',
-          isPaused: false,
-        },
-        {
-          id: '0987654321@c.us',
-          name: 'Jane Smith',
-          isPaused: false,
-        },
-        {
-          id: '5555555555@c.us',
-          name: 'Test Contact',
-          isPaused: true,
-          pauseReason: 'manual',
-        },
-      ];
-
-      setContacts(placeholderContacts);
-      setIsLoading(false);
-    }, 800);
-  }
+  }, [setContacts]);
 
   async function toggleContact(contactId: string, currentlyPaused: boolean) {
     setLoadingContactId(contactId);

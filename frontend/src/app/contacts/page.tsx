@@ -6,13 +6,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import ContactList from '@/components/ContactList';
+import ContactList, { Contact } from '@/components/ContactList';
 import { socketClient } from '@/lib/socket';
 import Link from 'next/link';
 
 export default function ContactsPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Calculate dynamic stats from contacts
+  const totalContacts = contacts.length;
+  const activeContacts = contacts.filter((c) => !c.isPaused).length;
 
   useEffect(() => {
     const socket = socketClient.getSocket();
@@ -27,6 +33,37 @@ export default function ContactsPage() {
     return () => {
       socketClient.offConnectionStatus(handleConnectionStatus);
     };
+  }, []);
+
+  // Load contacts (placeholder - will be implemented with real WhatsApp contact fetching)
+  useEffect(() => {
+    const loadPlaceholderContacts = () => {
+      setTimeout(() => {
+        const placeholderContacts: Contact[] = [
+          {
+            id: '1234567890@c.us',
+            name: 'John Doe',
+            isPaused: false,
+          },
+          {
+            id: '0987654321@c.us',
+            name: 'Jane Smith',
+            isPaused: false,
+          },
+          {
+            id: '5555555555@c.us',
+            name: 'Test Contact',
+            isPaused: true,
+            pauseReason: 'manual',
+          },
+        ];
+
+        setContacts(placeholderContacts);
+        setIsLoading(false);
+      }, 800);
+    };
+
+    loadPlaceholderContacts();
   }, []);
 
   return (
@@ -47,11 +84,11 @@ export default function ContactsPage() {
             {/* Stats summary */}
             <div className="flex gap-4">
               <div className="rounded-lg border border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">3</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalContacts}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Total Contacts</p>
               </div>
               <div className="rounded-lg border border-success-200 bg-success-50 px-4 py-2 dark:border-success-900/50 dark:bg-success-900/20">
-                <p className="text-2xl font-bold text-success-600 dark:text-success-400">2</p>
+                <p className="text-2xl font-bold text-success-600 dark:text-success-400">{activeContacts}</p>
                 <p className="text-xs text-success-600 dark:text-success-400">Active</p>
               </div>
             </div>
@@ -134,7 +171,7 @@ export default function ContactsPage() {
         </div>
 
         {/* Contact List */}
-        <ContactList />
+        <ContactList contacts={contacts} setContacts={setContacts} isLoading={isLoading} />
 
         {/* Help Section */}
         <div className="mt-8 card animate-fade-in-up" style={{ animationDelay: '200ms' }}>
