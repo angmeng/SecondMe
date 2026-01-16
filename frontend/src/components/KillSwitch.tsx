@@ -1,6 +1,6 @@
 /**
  * Master Kill Switch Component
- * Global pause control for all bot activity
+ * Global pause control for all bot activity with enhanced visuals
  */
 
 'use client';
@@ -12,7 +12,6 @@ export default function KillSwitch() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Check initial state on mount
   useEffect(() => {
     checkStatus();
   }, []);
@@ -63,88 +62,206 @@ export default function KillSwitch() {
   }
 
   return (
-    <div className="card">
-      <div className="flex items-center justify-between">
+    <div
+      className={`
+        card overflow-hidden transition-all duration-300
+        ${isEnabled ? 'border-error-200 dark:border-error-900/50' : 'border-success-200 dark:border-success-900/50'}
+      `}
+    >
+      {/* Glow background effect */}
+      <div
+        className={`
+          absolute inset-0 opacity-5 transition-opacity duration-500
+          ${isEnabled ? 'bg-gradient-to-br from-error-500 to-error-600' : 'bg-gradient-to-br from-success-500 to-success-600'}
+        `}
+      />
+
+      <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+        {/* Left side - Info */}
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            Master Kill Switch
-          </h3>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            {isEnabled
-              ? 'Bot is paused globally - no automated responses'
-              : 'Bot is active and responding to messages'}
-          </p>
-          {error && <p className="mt-1 text-sm text-error">{error}</p>}
+          <div className="flex items-center gap-3">
+            {/* Status Icon */}
+            <div
+              className={`
+                flex h-12 w-12 items-center justify-center rounded-xl transition-all duration-300
+                ${
+                  isEnabled
+                    ? 'bg-error-100 text-error-600 dark:bg-error-900/30 dark:text-error-400'
+                    : 'bg-success-100 text-success-600 dark:bg-success-900/30 dark:text-success-400'
+                }
+              `}
+            >
+              {isEnabled ? (
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                  />
+                </svg>
+              ) : (
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Master Kill Switch
+              </h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {isEnabled
+                  ? 'Bot is paused globally - no automated responses'
+                  : 'Bot is active and responding to messages'}
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-3 rounded-lg bg-error-50 px-3 py-2 dark:bg-error-900/20">
+              <p className="text-sm text-error-600 dark:text-error-400">{error}</p>
+            </div>
+          )}
         </div>
 
-        <div className="ml-4">
+        {/* Right side - Toggle */}
+        <div className="flex items-center gap-4">
+          {/* Status indicator */}
+          <div className="flex items-center gap-2">
+            <div
+              className={`
+                h-2.5 w-2.5 rounded-full transition-all duration-300
+                ${
+                  isEnabled
+                    ? 'bg-error-500 shadow-glow-error animate-pulse-subtle'
+                    : 'bg-success-500 shadow-glow-success'
+                }
+              `}
+            />
+            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              {isEnabled ? 'Paused' : 'Active'}
+            </span>
+          </div>
+
+          {/* Toggle Switch */}
           <button
             onClick={toggleKillSwitch}
             disabled={isLoading}
-            className={`relative inline-flex h-12 w-24 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              isEnabled
-                ? 'bg-error focus:ring-error'
-                : 'bg-success focus:ring-success'
-            } ${isLoading ? 'opacity-50' : ''}`}
-            aria-label={isEnabled ? 'Disable kill switch' : 'Enable kill switch'}
+            className={`
+              relative inline-flex h-14 w-28 flex-shrink-0 cursor-pointer items-center rounded-full
+              transition-all duration-300 ease-bounce-in
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+              ${
+                isEnabled
+                  ? 'bg-error-500 shadow-glow-error focus-visible:ring-error-500'
+                  : 'bg-success-500 shadow-glow-success focus-visible:ring-success-500'
+              }
+              ${isLoading ? 'opacity-70 cursor-wait' : 'hover:shadow-lg'}
+            `}
+            aria-label={isEnabled ? 'Resume bot activity' : 'Pause bot activity'}
+            role="switch"
+            aria-checked={isEnabled}
           >
-            {/* Toggle circle */}
+            {/* Toggle knob */}
             <span
-              className={`inline-block h-10 w-10 transform rounded-full bg-white shadow-lg transition-transform ${
-                isEnabled ? 'translate-x-12' : 'translate-x-1'
-              }`}
+              className={`
+                inline-flex h-12 w-12 transform items-center justify-center rounded-full
+                bg-white shadow-lg transition-all duration-300 ease-bounce-in
+                ${isEnabled ? 'translate-x-14' : 'translate-x-1'}
+              `}
             >
               {isLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600"></div>
-                </div>
+                <svg
+                  className="h-5 w-5 animate-spin text-slate-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+              ) : isEnabled ? (
+                <svg
+                  className="h-6 w-6 text-error-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
               ) : (
-                <div className="flex h-full items-center justify-center">
-                  {isEnabled ? (
-                    <svg
-                      className="h-6 w-6 text-error"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="h-6 w-6 text-success"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  )}
-                </div>
+                <svg
+                  className="h-6 w-6 text-success-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
               )}
             </span>
           </button>
         </div>
       </div>
 
-      {/* Status indicator */}
-      <div className="mt-4 flex items-center space-x-2">
-        <div
-          className={`h-3 w-3 rounded-full ${
-            isEnabled ? 'bg-error animate-pulse' : 'bg-success'
-          }`}
-        ></div>
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          {isEnabled ? 'All bot activity paused' : 'Bot is operational'}
+      {/* Bottom status bar */}
+      <div className="relative mt-6 flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-700">
+        <div className="flex items-center gap-2">
+          <svg
+            className="h-4 w-4 text-slate-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {isEnabled
+              ? 'Toggle to resume all bot activity'
+              : 'Toggle to pause all bot activity instantly'}
+          </span>
+        </div>
+
+        {/* Quick status badge */}
+        <span
+          className={`
+            badge text-xs
+            ${isEnabled ? 'badge-error' : 'badge-success'}
+          `}
+        >
+          {isEnabled ? 'All Paused' : 'Operational'}
         </span>
       </div>
     </div>

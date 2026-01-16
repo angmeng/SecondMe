@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 /**
  * DELETE /api/kill-switch - Disable master kill switch (clear global pause)
  */
-export async function DELETE(request: NextRequest) {
+export async function DELETE(_request: NextRequest) {
   try {
     await redisClient.clearGlobalPause();
 
@@ -57,7 +57,7 @@ export async function DELETE(request: NextRequest) {
 /**
  * GET /api/kill-switch - Check if master kill switch is enabled
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const isEnabled = await redisClient.isGlobalPauseActive();
 
