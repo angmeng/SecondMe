@@ -7,6 +7,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import '@/styles/globals.css';
 import Navigation from '@/components/Navigation';
+import { ToastProvider } from '@/contexts/ToastContext';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -50,13 +51,15 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className="min-h-screen antialiased">
-        <div className="flex min-h-screen">
-          <Navigation />
-          {/* Main content area - offset for sidebar on desktop, bottom nav on mobile */}
-          <main className="flex-1 pb-20 lg:ml-16 lg:pb-0">
-            {children}
-          </main>
-        </div>
+        <ToastProvider>
+          <div className="flex min-h-screen">
+            <Navigation />
+            {/* Main content area - offset for sidebar on desktop, bottom nav on mobile */}
+            <main className="flex-1 pb-20 lg:ml-16 lg:pb-0">
+              {children}
+            </main>
+          </div>
+        </ToastProvider>
       </body>
     </html>
   );

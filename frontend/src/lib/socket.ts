@@ -11,6 +11,14 @@ class SocketClient {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private lastConnectionStatus: 'connected' | 'disconnected' | 'qr' | 'ready' = 'disconnected';
+
+  /**
+   * Get the last received WhatsApp connection status (cached)
+   */
+  getLastConnectionStatus(): 'connected' | 'disconnected' | 'qr' | 'ready' {
+    return this.lastConnectionStatus;
+  }
 
   /**
    * Get or create Socket.io connection
@@ -64,6 +72,11 @@ class SocketClient {
     this.socket.on('reconnect_failed', () => {
       console.error('[Socket Client] Reconnection failed');
     });
+
+    // Cache connection status for components that mount after the event was emitted
+    this.socket.on('connection_status', (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => {
+      this.lastConnectionStatus = data.status;
+    });
   }
 
   /**
@@ -114,7 +127,50 @@ class SocketClient {
   }
 
   /**
-   * Unsubscribe from all events
+   * Unsubscribe from QR code updates
+   */
+  offQRCode(callback: (data: { qr: string; timestamp: number }) => void): void {
+    this.socket?.off('qr_code', callback);
+  }
+
+  /**
+   * Unsubscribe from pause state updates
+   */
+  offPauseUpdate(
+    callback: (data: {
+      contactId: string;
+      action: 'pause' | 'resume';
+      reason?: string;
+      expiresAt?: number;
+    }) => void
+  ): void {
+    this.socket?.off('pause_update', callback);
+  }
+
+  /**
+   * Unsubscribe from WhatsApp connection status
+   */
+  offConnectionStatus(
+    callback: (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => void
+  ): void {
+    this.socket?.off('connection_status', callback);
+  }
+
+  /**
+   * Unsubscribe from message status updates
+   */
+  offMessageStatus(
+    callback: (data: {
+      messageId: string;
+      status: 'sent' | 'delivered' | 'read' | 'failed';
+      timestamp: number;
+    }) => void
+  ): void {
+    this.socket?.off('message_status', callback);
+  }
+
+  /**
+   * Unsubscribe from all events and disconnect
    */
   disconnect(): void {
     if (this.socket) {

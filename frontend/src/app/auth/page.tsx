@@ -25,15 +25,15 @@ export default function AuthPage() {
   const [currentStep, setCurrentStep] = useState(1);
 
   useEffect(() => {
-    socketClient.onQRCode((data) => {
+    const handleQRCode = (data: { qr: string; timestamp: number }) => {
       console.log('[Auth Page] QR code received');
       setQRCode(data.qr);
       setStatus('qr');
       setIsConnecting(false);
       setCurrentStep(2);
-    });
+    };
 
-    socketClient.onConnectionStatus((data) => {
+    const handleConnectionStatus = (data: { status: ConnectionStatus }) => {
       console.log('[Auth Page] Connection status:', data.status);
       setStatus(data.status);
 
@@ -45,9 +45,15 @@ export default function AuthPage() {
         setIsConnecting(false);
         setCurrentStep(2);
       }
-    });
+    };
 
-    return () => {};
+    socketClient.onQRCode(handleQRCode);
+    socketClient.onConnectionStatus(handleConnectionStatus);
+
+    return () => {
+      socketClient.offQRCode(handleQRCode);
+      socketClient.offConnectionStatus(handleConnectionStatus);
+    };
   }, []);
 
   return (

@@ -1,16 +1,21 @@
 /**
  * LangGraph Workflow for Message Processing
- * User Story 1: Basic message routing with pause control
+ * User Story 2: Enhanced workflow with persona-based responses and knowledge graph context
  */
 
 import { StateGraph, END } from '@langchain/langgraph';
 import { sonnetClient } from '../anthropic/sonnet-client.js';
+import { haikuClient } from '../anthropic/haiku-client.js';
 import { redisClient } from '../redis/client.js';
+import { routerNode, routeByClassification, RouterState, MessageClassification } from './router-node.js';
+import { graphAndPersonaNode, GraphState } from './graph-node.js';
+import { buildContextualSystemPrompt, buildSimpleSystemPrompt } from '../anthropic/prompt-templates.js';
+import { ContactContext, PersonaContext } from '../falkordb/queries.js';
 
 /**
- * Workflow state interface
+ * Workflow state interface - combines all node state requirements
  */
-export interface WorkflowState {
+export interface WorkflowState extends GraphState {
   messageId: string;
   contactId: string;
   contactName: string;
@@ -18,24 +23,44 @@ export interface WorkflowState {
   timestamp: number;
 
   // Pause control
-  isPaused?: boolean;
-  pauseReason?: string;
+  isPaused: boolean | undefined;
+  pauseReason: string | undefined;
+
+  // Classification (from router)
+  classification: MessageClassification | undefined;
+  classificationLatency: number | undefined;
+  classificationTokens: number | undefined;
 
   // Response generation
-  response?: string;
-  tokensUsed?: number;
+  response: string | undefined;
+  tokensUsed: number | undefined;
+  cacheReadTokens: number | undefined;
+  cacheWriteTokens: number | undefined;
 
   // HTS timing
-  typingDelay?: number;
+  typingDelay: number | undefined;
 
   // Error handling
-  error?: string;
+  error: string | undefined;
+}
+
+// Token usage log for analytics
+interface TokenUsageLog {
+  messageId: string;
+  contactId: string;
+  classification: MessageClassification | undefined;
+  classificationTokens: number;
+  responseTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalLatencyMs: number;
+  timestamp: number;
 }
 
 /**
  * Check if contact is paused (global or contact-specific)
  */
-async function checkPauseNode(state: WorkflowState): Partial<WorkflowState> {
+async function checkPauseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Workflow] Checking pause state for ${state.contactId}...`);
 
   // Check global pause
@@ -67,35 +92,124 @@ async function checkPauseNode(state: WorkflowState): Partial<WorkflowState> {
 }
 
 /**
- * Generate simple response using Sonnet
- * For User Story 1: Basic replies without persona or context
+ * Generate response for PHATIC messages using Haiku
+ * Fast path - no context retrieval needed
  */
-async function generateResponseNode(state: WorkflowState): Partial<WorkflowState> {
-  console.log(`[Workflow] Generating response for message from ${state.contactId}...`);
+async function phaticResponseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  console.log(`[Workflow] Generating phatic response for ${state.contactId}...`);
+
+  const startTime = Date.now();
 
   try {
-    // Simple persona for MVP - will be replaced in User Story 2
-    const simplePersona = `You are a friendly assistant. Keep responses brief and natural for WhatsApp chat.`;
+    // Use default casual persona for phatic messages
+    const simplePersona = state.persona?.styleGuide ||
+      'Keep responses very brief and natural. Match the energy of simple acknowledgments.';
 
-    // Call Sonnet with basic prompt
-    const result = await sonnetClient.getSimpleResponse(state.content, simplePersona);
+    // Call Haiku for quick response
+    const result = await haikuClient.getSimpleResponse(state.content, simplePersona);
 
-    console.log(
-      `[Workflow] Response generated: ${result.tokensUsed} tokens (cache read: ${result.cacheReadTokens})`
-    );
+    const latency = Date.now() - startTime;
+    console.log(`[Workflow] Phatic response generated in ${latency}ms (${result.tokensUsed} tokens)`);
 
-    // Calculate typing delay based on response length (HTS)
+    // Calculate typing delay
     const typingDelay = calculateTypingDelay(result.response);
+
+    // Log token usage
+    await logTokenUsage({
+      messageId: state.messageId,
+      contactId: state.contactId,
+      classification: 'phatic',
+      classificationTokens: state.classificationTokens || 0,
+      responseTokens: result.tokensUsed,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalLatencyMs: latency + (state.classificationLatency || 0),
+      timestamp: Date.now(),
+    });
 
     return {
       response: result.response,
       tokensUsed: result.tokensUsed,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       typingDelay,
     };
   } catch (error: any) {
-    console.error('[Workflow] Error generating response:', error);
+    console.error('[Workflow] Error generating phatic response:', error);
     return {
-      error: error.message || 'Failed to generate response',
+      error: error.message || 'Failed to generate phatic response',
+    };
+  }
+}
+
+/**
+ * Generate response for SUBSTANTIVE messages using Sonnet with context
+ * Full path - uses persona and graph context
+ */
+async function substantiveResponseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  console.log(`[Workflow] Generating substantive response for ${state.contactId}...`);
+
+  const startTime = Date.now();
+
+  try {
+    // Get persona (should be set by graphAndPersonaNode)
+    const persona: PersonaContext = state.persona || {
+      id: 'fallback',
+      name: 'Default',
+      styleGuide: 'Keep responses brief and natural.',
+      tone: 'casual',
+      exampleMessages: [],
+      applicableTo: ['acquaintance'],
+    };
+
+    // Get graph context (should be set by graphAndPersonaNode)
+    const context: ContactContext = state.graphContext || {
+      people: [],
+      topics: [],
+      events: [],
+    };
+
+    // Build contextual system prompt with caching
+    const systemPrompt = buildContextualSystemPrompt(persona, context, state.contactName);
+
+    // Call Sonnet with context
+    const result = await sonnetClient.getContextualResponse(state.content, persona.styleGuide, {
+      people: context.people,
+      topics: context.topics,
+    });
+
+    const latency = Date.now() - startTime;
+    console.log(
+      `[Workflow] Substantive response generated in ${latency}ms (${result.tokensUsed} tokens, cache read: ${result.cacheReadTokens}, cache write: ${result.cacheWriteTokens})`
+    );
+
+    // Calculate typing delay
+    const typingDelay = calculateTypingDelay(result.response);
+
+    // Log token usage
+    await logTokenUsage({
+      messageId: state.messageId,
+      contactId: state.contactId,
+      classification: 'substantive',
+      classificationTokens: state.classificationTokens || 0,
+      responseTokens: result.tokensUsed,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
+      totalLatencyMs: latency + (state.classificationLatency || 0) + (state.graphQueryLatency || 0),
+      timestamp: Date.now(),
+    });
+
+    return {
+      response: result.response,
+      tokensUsed: result.tokensUsed,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
+      typingDelay,
+    };
+  } catch (error: any) {
+    console.error('[Workflow] Error generating substantive response:', error);
+    return {
+      error: error.message || 'Failed to generate substantive response',
     };
   }
 }
@@ -118,7 +232,7 @@ function calculateTypingDelay(text: string): number {
 /**
  * Queue response to Gateway for sending
  */
-async function queueResponseNode(state: WorkflowState): Partial<WorkflowState> {
+async function queueResponseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   if (!state.response) {
     console.error('[Workflow] No response to queue');
     return {};
@@ -133,6 +247,8 @@ async function queueResponseNode(state: WorkflowState): Partial<WorkflowState> {
       content: state.response,
       timestamp: Date.now(),
       typingDelay: state.typingDelay || 2000,
+      classification: state.classification,
+      tokensUsed: state.tokensUsed,
     });
 
     await redisClient.client.xadd('QUEUE:responses', '*', 'payload', responsePayload);
@@ -149,68 +265,156 @@ async function queueResponseNode(state: WorkflowState): Partial<WorkflowState> {
 }
 
 /**
- * Routing logic - determines next node based on state
+ * Log token usage to Redis for analytics
  */
-function shouldContinue(state: WorkflowState): string {
-  // If paused, end workflow
+async function logTokenUsage(log: TokenUsageLog): Promise<void> {
+  try {
+    // Store in Redis sorted set by timestamp for easy retrieval
+    const key = 'LOGS:token_usage';
+    const member = JSON.stringify(log);
+    await redisClient.client.zadd(key, log.timestamp, member);
+
+    // Also increment daily counters
+    const dateKey = new Date().toISOString().split('T')[0];
+    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'classification', log.classificationTokens);
+    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'response', log.responseTokens);
+    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'cache_read', log.cacheReadTokens);
+    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'cache_write', log.cacheWriteTokens);
+    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'total_messages', 1);
+
+    // Set expiry on daily stats (30 days)
+    await redisClient.client.expire(`STATS:tokens:${dateKey}`, 30 * 24 * 60 * 60);
+
+  } catch (error) {
+    console.error('[Workflow] Error logging token usage:', error);
+    // Don't fail the workflow for logging errors
+  }
+}
+
+/**
+ * Routing logic - determines next node after pause check
+ */
+function shouldContinueAfterPause(state: WorkflowState): string {
   if (state.isPaused) {
     return END;
   }
+  if (state.error) {
+    return END;
+  }
+  return 'router';
+}
 
-  // If error occurred, end workflow
+/**
+ * Routing logic - determines next node based on classification
+ */
+function routeByMessageType(state: WorkflowState): string {
   if (state.error) {
     return END;
   }
 
-  // Continue to response generation
-  return 'generate_response';
+  if (state.classification === 'phatic') {
+    return 'phatic_response';
+  }
+
+  // Substantive messages need context retrieval first
+  return 'graph_query';
 }
 
+/**
+ * Routing logic - after graph query, generate response
+ */
+function afterGraphQuery(state: WorkflowState): string {
+  if (state.error) {
+    return END;
+  }
+  return 'substantive_response';
+}
+
+/**
+ * Routing logic - after response generation, queue it
+ */
 function shouldQueueResponse(state: WorkflowState): string {
-  // If error or no response, end workflow
   if (state.error || !state.response) {
     return END;
   }
-
-  // Queue response
   return 'queue_response';
 }
 
 /**
  * Build and compile the workflow graph
+ * User Story 2 workflow:
+ *
+ * check_pause -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
  */
 export function buildWorkflow() {
   const workflow = new StateGraph<WorkflowState>({
     channels: {
+      // Base fields
       messageId: null,
       contactId: null,
       contactName: null,
       content: null,
       timestamp: null,
+      // Pause control
       isPaused: null,
       pauseReason: null,
+      // Classification
+      classification: null,
+      classificationLatency: null,
+      classificationTokens: null,
+      // Graph context
+      contactInfo: null,
+      relationshipType: null,
+      graphContext: null,
+      graphQueryLatency: null,
+      // Persona
+      persona: null,
+      personaCached: null,
+      // Response
       response: null,
       tokensUsed: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
       typingDelay: null,
+      // Error
       error: null,
     },
   });
 
   // Add nodes
   workflow.addNode('check_pause', checkPauseNode);
-  workflow.addNode('generate_response', generateResponseNode);
+  workflow.addNode('router', routerNode);
+  workflow.addNode('phatic_response', phaticResponseNode);
+  workflow.addNode('graph_query', graphAndPersonaNode);
+  workflow.addNode('substantive_response', substantiveResponseNode);
   workflow.addNode('queue_response', queueResponseNode);
 
   // Set entry point
   workflow.setEntryPoint('check_pause');
 
   // Add conditional edges
-  workflow.addConditionalEdges('check_pause', shouldContinue, {
-    generate_response: 'generate_response',
+  workflow.addConditionalEdges('check_pause', shouldContinueAfterPause, {
+    router: 'router',
     [END]: END,
   });
 
-  workflow.addConditionalEdges('generate_response', shouldQueueResponse, {
+  workflow.addConditionalEdges('router', routeByMessageType, {
+    phatic_response: 'phatic_response',
+    graph_query: 'graph_query',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('phatic_response', shouldQueueResponse, {
+    queue_response: 'queue_response',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('graph_query', afterGraphQuery, {
+    substantive_response: 'substantive_response',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('substantive_response', shouldQueueResponse, {
     queue_response: 'queue_response',
     [END]: END,
   });
@@ -219,4 +423,9 @@ export function buildWorkflow() {
 
   // Compile the graph
   return workflow.compile();
+}
+
+// Legacy function for backward compatibility
+export function buildSimpleWorkflow() {
+  return buildWorkflow();
 }

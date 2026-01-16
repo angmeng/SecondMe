@@ -60,8 +60,8 @@ class WhatsAppClient {
       this.ready = true;
 
       // Emit ready status to dashboard
-      io.emit('whatsapp_status', {
-        status: 'connected',
+      io.emit('connection_status', {
+        status: 'ready',
         timestamp: Date.now(),
       });
 
@@ -82,8 +82,8 @@ class WhatsAppClient {
     this.client.on('auth_failure', (msg) => {
       console.error('[Gateway WhatsApp] Authentication failed:', msg);
 
-      io.emit('whatsapp_status', {
-        status: 'auth_failed',
+      io.emit('connection_status', {
+        status: 'disconnected',
         error: msg,
         timestamp: Date.now(),
       });
@@ -94,7 +94,7 @@ class WhatsAppClient {
       console.log('[Gateway WhatsApp] Client disconnected:', reason);
       this.ready = false;
 
-      io.emit('whatsapp_status', {
+      io.emit('connection_status', {
         status: 'disconnected',
         reason,
         timestamp: Date.now(),

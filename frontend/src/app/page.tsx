@@ -23,7 +23,9 @@ interface RecentActivity {
 }
 
 export default function HomePage() {
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
+    () => socketClient.getLastConnectionStatus()
+  );
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'messages' | 'pauses'>('all');
@@ -32,21 +34,30 @@ export default function HomePage() {
     const socket = socketClient.getSocket();
     setIsSocketConnected(socket.connected);
 
-    socketClient.onConnectionStatus((data) => {
+    const handleConnectionStatus = (data: { status: ConnectionStatus }) => {
       console.log('[Dashboard] Connection status:', data.status);
       setConnectionStatus(data.status);
-    });
+    };
 
-    socketClient.onMessageStatus((data) => {
+    const handleMessageStatus = (data: {
+      messageId: string;
+      status: 'sent' | 'delivered' | 'read' | 'failed';
+      timestamp: number;
+    }) => {
       addActivity({
         id: data.messageId,
         type: data.status === 'sent' ? 'message_sent' : 'message_received',
         contactId: data.messageId.split('@')[0] || data.messageId,
         timestamp: data.timestamp,
       });
-    });
+    };
 
-    socketClient.onPauseUpdate((data) => {
+    const handlePauseUpdate = (data: {
+      contactId: string;
+      action: 'pause' | 'resume';
+      reason?: string;
+      expiresAt?: number;
+    }) => {
       addActivity({
         id: `pause-${Date.now()}`,
         type: 'pause',
@@ -54,9 +65,17 @@ export default function HomePage() {
         timestamp: Date.now(),
         details: data.reason || 'manual',
       });
-    });
+    };
 
-    return () => {};
+    socketClient.onConnectionStatus(handleConnectionStatus);
+    socketClient.onMessageStatus(handleMessageStatus);
+    socketClient.onPauseUpdate(handlePauseUpdate);
+
+    return () => {
+      socketClient.offConnectionStatus(handleConnectionStatus);
+      socketClient.offMessageStatus(handleMessageStatus);
+      socketClient.offPauseUpdate(handlePauseUpdate);
+    };
   }, []);
 
   function addActivity(activity: RecentActivity) {
@@ -267,8 +286,12 @@ export default function HomePage() {
                 Manage Contacts
               </Link>
               <Link
-                href="/auth"
-                className="btn btn-secondary w-full justify-start"
+                href={connectionStatus === 'ready' ? '#' : '/auth'}
+                className={`btn btn-secondary w-full justify-start ${
+                  connectionStatus === 'ready' ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+                onClick={(e) => connectionStatus === 'ready' && e.preventDefault()}
+                title={connectionStatus === 'ready' ? 'Already connected' : undefined}
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
