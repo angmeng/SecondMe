@@ -3,19 +3,25 @@
  * User Story 2: Enhanced workflow with persona-based responses and knowledge graph context
  */
 
-import { StateGraph, END } from '@langchain/langgraph';
+import { StateGraph, Annotation, END } from '@langchain/langgraph';
 import { sonnetClient } from '../anthropic/sonnet-client.js';
 import { haikuClient } from '../anthropic/haiku-client.js';
 import { redisClient } from '../redis/client.js';
-import { routerNode, routeByClassification, RouterState, MessageClassification } from './router-node.js';
-import { graphAndPersonaNode, GraphState } from './graph-node.js';
-import { buildContextualSystemPrompt, buildSimpleSystemPrompt } from '../anthropic/prompt-templates.js';
-import { ContactContext, PersonaContext } from '../falkordb/queries.js';
+import { routerNode } from './router-node.js';
+import { graphAndPersonaNode } from './graph-node.js';
+import { ContactContext, PersonaContext, ContactInfo } from '../falkordb/queries.js';
 
 /**
- * Workflow state interface - combines all node state requirements
+ * Message classification type
  */
-export interface WorkflowState extends GraphState {
+export type MessageClassification = 'phatic' | 'substantive';
+
+/**
+ * Workflow state interface - single flattened definition
+ * All node functions use this same state type
+ */
+export interface WorkflowState {
+  // Base message fields
   messageId: string;
   contactId: string;
   contactName: string;
@@ -23,25 +29,37 @@ export interface WorkflowState extends GraphState {
   timestamp: number;
 
   // Pause control
-  isPaused: boolean | undefined;
-  pauseReason: string | undefined;
+  isPaused?: boolean;
+  pauseReason?: string;
 
   // Classification (from router)
-  classification: MessageClassification | undefined;
-  classificationLatency: number | undefined;
-  classificationTokens: number | undefined;
+  classification?: MessageClassification;
+  classificationLatency?: number;
+  classificationTokens?: number;
+
+  // Contact information (from graph node)
+  contactInfo?: ContactInfo;
+  relationshipType?: string;
+
+  // Graph context (from graph node)
+  graphContext?: ContactContext;
+  graphQueryLatency?: number;
+
+  // Persona (from graph node)
+  persona?: PersonaContext;
+  personaCached?: boolean;
 
   // Response generation
-  response: string | undefined;
-  tokensUsed: number | undefined;
-  cacheReadTokens: number | undefined;
-  cacheWriteTokens: number | undefined;
+  response?: string;
+  tokensUsed?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 
   // HTS timing
-  typingDelay: number | undefined;
+  typingDelay?: number;
 
   // Error handling
-  error: string | undefined;
+  error?: string;
 }
 
 // Token usage log for analytics
@@ -168,9 +186,6 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       topics: [],
       events: [],
     };
-
-    // Build contextual system prompt with caching
-    const systemPrompt = buildContextualSystemPrompt(persona, context, state.contactName);
 
     // Call Sonnet with context
     const result = await sonnetClient.getContextualResponse(state.content, persona.styleGuide, {
@@ -341,45 +356,50 @@ function shouldQueueResponse(state: WorkflowState): string {
 }
 
 /**
+ * State annotation for LangGraph workflow
+ */
+const WorkflowStateAnnotation = Annotation.Root({
+  // Base message fields
+  messageId: Annotation<string>,
+  contactId: Annotation<string>,
+  contactName: Annotation<string>,
+  content: Annotation<string>,
+  timestamp: Annotation<number>,
+  // Pause control
+  isPaused: Annotation<boolean | undefined>,
+  pauseReason: Annotation<string | undefined>,
+  // Classification
+  classification: Annotation<MessageClassification | undefined>,
+  classificationLatency: Annotation<number | undefined>,
+  classificationTokens: Annotation<number | undefined>,
+  // Graph context
+  contactInfo: Annotation<ContactInfo | undefined>,
+  relationshipType: Annotation<string | undefined>,
+  graphContext: Annotation<ContactContext | undefined>,
+  graphQueryLatency: Annotation<number | undefined>,
+  // Persona
+  persona: Annotation<PersonaContext | undefined>,
+  personaCached: Annotation<boolean | undefined>,
+  // Response
+  response: Annotation<string | undefined>,
+  tokensUsed: Annotation<number | undefined>,
+  cacheReadTokens: Annotation<number | undefined>,
+  cacheWriteTokens: Annotation<number | undefined>,
+  typingDelay: Annotation<number | undefined>,
+  // Error
+  error: Annotation<string | undefined>,
+});
+
+/**
  * Build and compile the workflow graph
  * User Story 2 workflow:
  *
  * check_pause -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
  */
 export function buildWorkflow() {
-  const workflow = new StateGraph<WorkflowState>({
-    channels: {
-      // Base fields
-      messageId: null,
-      contactId: null,
-      contactName: null,
-      content: null,
-      timestamp: null,
-      // Pause control
-      isPaused: null,
-      pauseReason: null,
-      // Classification
-      classification: null,
-      classificationLatency: null,
-      classificationTokens: null,
-      // Graph context
-      contactInfo: null,
-      relationshipType: null,
-      graphContext: null,
-      graphQueryLatency: null,
-      // Persona
-      persona: null,
-      personaCached: null,
-      // Response
-      response: null,
-      tokensUsed: null,
-      cacheReadTokens: null,
-      cacheWriteTokens: null,
-      typingDelay: null,
-      // Error
-      error: null,
-    },
-  });
+  // Use type assertion to work around strict StateGraph typing
+  // The runtime behavior is correct; this is just a TypeScript limitation with the Annotation API
+  const workflow = new StateGraph(WorkflowStateAnnotation) as any;
 
   // Add nodes
   workflow.addNode('check_pause', checkPauseNode);
@@ -390,7 +410,7 @@ export function buildWorkflow() {
   workflow.addNode('queue_response', queueResponseNode);
 
   // Set entry point
-  workflow.setEntryPoint('check_pause');
+  workflow.addEdge('__start__', 'check_pause');
 
   // Add conditional edges
   workflow.addConditionalEdges('check_pause', shouldContinueAfterPause, {

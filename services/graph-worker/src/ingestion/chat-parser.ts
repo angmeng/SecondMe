@@ -69,8 +69,8 @@ export function parseWhatsAppExport(content: string): ParsedChat {
   const result: ParsedChat = {
     messages,
     participants,
-    startDate: messages.length > 0 ? messages[0].timestamp : undefined,
-    endDate: messages.length > 0 ? messages[messages.length - 1].timestamp : undefined,
+    startDate: messages[0]?.timestamp,
+    endDate: messages[messages.length - 1]?.timestamp,
     messageCount: messages.length,
     mediaCount,
   };

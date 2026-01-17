@@ -5,24 +5,13 @@
  */
 
 import { haikuClient } from '../anthropic/haiku-client.js';
-import { WorkflowState } from './workflow.js';
-
-export type MessageClassification = 'phatic' | 'substantive';
-
-/**
- * Extended workflow state with classification
- */
-export interface RouterState extends WorkflowState {
-  classification?: MessageClassification;
-  classificationLatency?: number;
-  classificationTokens?: number;
-}
+import { WorkflowState, MessageClassification } from './workflow.js';
 
 /**
  * Router node - classifies incoming message using Haiku
  * Determines whether to retrieve graph context (substantive) or skip to simple response (phatic)
  */
-export async function routerNode(state: RouterState): Promise<Partial<RouterState>> {
+export async function routerNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Router Node] Classifying message from ${state.contactId}...`);
 
   const startTime = Date.now();
@@ -119,7 +108,7 @@ function quickClassify(content: string): MessageClassification | null {
 /**
  * Routing decision function - determines next node based on classification
  */
-export function routeByClassification(state: RouterState): string {
+export function routeByClassification(state: WorkflowState): string {
   if (state.error) {
     return 'end';
   }

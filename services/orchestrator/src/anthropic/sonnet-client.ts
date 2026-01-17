@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 
 if (!ANTHROPIC_API_KEY) {
   console.warn('[Sonnet Client] ANTHROPIC_API_KEY not set, client will fail at runtime');
@@ -55,8 +55,9 @@ class SonnetClient {
       });
 
       const latency = Date.now() - startTime;
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
+      const firstBlock = response.content[0];
+      const responseText = firstBlock && firstBlock.type === 'text'
+        ? firstBlock.text
         : '';
 
       const tokensUsed = response.usage.input_tokens + response.usage.output_tokens;
@@ -83,7 +84,7 @@ class SonnetClient {
   private buildCachedSystemPrompt(
     personaStyleGuide: string,
     graphContext: { people: any[]; topics: any[] }
-  ): Anthropic.Messages.MessageCreateParams['system'] {
+  ): Anthropic.Messages.TextBlockParam[] {
     // Format graph context as readable text
     const contextText = this.formatGraphContext(graphContext);
 

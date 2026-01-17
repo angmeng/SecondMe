@@ -5,7 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 
 if (!ANTHROPIC_API_KEY) {
   console.warn('[Haiku Client] ANTHROPIC_API_KEY not set, client will fail at runtime');
@@ -48,8 +48,9 @@ Classification (respond with only "phatic" or "substantive"):`,
       });
 
       const latency = Date.now() - startTime;
-      const classification = response.content[0].type === 'text'
-        ? response.content[0].text.trim().toLowerCase()
+      const firstBlock = response.content[0];
+      const classification = firstBlock && firstBlock.type === 'text'
+        ? firstBlock.text.trim().toLowerCase()
         : 'substantive';
 
       const tokensUsed = response.usage.input_tokens + response.usage.output_tokens;
@@ -99,8 +100,9 @@ Respond briefly to this simple message. Keep it natural and concise.`,
       });
 
       const latency = Date.now() - startTime;
-      const responseText = response.content[0].type === 'text'
-        ? response.content[0].text
+      const responseBlock = response.content[0];
+      const responseText = responseBlock && responseBlock.type === 'text'
+        ? responseBlock.text
         : '';
 
       const tokensUsed = response.usage.input_tokens + response.usage.output_tokens;

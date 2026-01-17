@@ -3,34 +3,15 @@
  * User Story 2: Retrieves relevant context from FalkorDB for substantive messages
  */
 
-import { RouterState } from './router-node.js';
+import { WorkflowState } from './workflow.js';
 import {
   getContactContext,
   getContactInfo,
   getPersonaForContact,
   getDefaultPersona,
-  ContactContext,
   PersonaContext,
-  ContactInfo,
 } from '../falkordb/queries.js';
 import { personaCache } from '../redis/persona-cache.js';
-
-/**
- * Extended workflow state with graph context
- */
-export interface GraphState extends RouterState {
-  // Contact information
-  contactInfo: ContactInfo | undefined;
-  relationshipType: string | undefined;
-
-  // Graph context
-  graphContext: ContactContext | undefined;
-  graphQueryLatency: number | undefined;
-
-  // Persona
-  persona: PersonaContext | undefined;
-  personaCached: boolean | undefined;
-}
 
 // Default user ID (single-user MVP)
 const DEFAULT_USER_ID = 'user-1';
@@ -39,7 +20,7 @@ const DEFAULT_USER_ID = 'user-1';
  * Graph query node - retrieves context from FalkorDB
  * Only called for substantive messages that need context
  */
-export async function graphQueryNode(state: GraphState): Promise<Partial<GraphState>> {
+export async function graphQueryNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Graph Node] Retrieving context for ${state.contactId}...`);
 
   const startTime = Date.now();
@@ -51,7 +32,6 @@ export async function graphQueryNode(state: GraphState): Promise<Partial<GraphSt
     if (!contactInfo) {
       console.log(`[Graph Node] Contact ${state.contactId} not found in graph, using defaults`);
       return {
-        contactInfo: undefined,
         relationshipType: 'acquaintance',
         graphContext: { people: [], topics: [], events: [] },
         graphQueryLatency: Date.now() - startTime,
@@ -86,7 +66,7 @@ export async function graphQueryNode(state: GraphState): Promise<Partial<GraphSt
  * Persona retrieval node - gets persona based on relationship type
  * Checks Redis cache first, then falls back to FalkorDB
  */
-export async function personaNode(state: GraphState): Promise<Partial<GraphState>> {
+export async function personaNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Persona Node] Getting persona for relationship type: ${state.relationshipType || 'unknown'}...`);
 
   const relationshipType = state.relationshipType || 'acquaintance';
@@ -174,7 +154,7 @@ export async function personaNode(state: GraphState): Promise<Partial<GraphState
  * Combined graph + persona node for efficiency
  * Runs graph query and persona retrieval in parallel
  */
-export async function graphAndPersonaNode(state: GraphState): Promise<Partial<GraphState>> {
+export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Graph+Persona Node] Retrieving context and persona for ${state.contactId}...`);
 
   const startTime = Date.now();
@@ -197,11 +177,11 @@ export async function graphAndPersonaNode(state: GraphState): Promise<Partial<Gr
     );
 
     return {
-      contactInfo: contactInfo || undefined,
+      ...(contactInfo && { contactInfo }),
       relationshipType,
       graphContext,
       graphQueryLatency: latency,
-      persona: personaResult.persona,
+      ...(personaResult.persona && { persona: personaResult.persona }),
       personaCached: personaResult.cached,
     };
   } catch (error: any) {
