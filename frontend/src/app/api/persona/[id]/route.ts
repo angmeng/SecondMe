@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // FalkorDB configuration
 const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
 const FALKORDB_PORT = process.env['FALKORDB_PORT'] || '6379';
+const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'] || 'falkordb_default_password';
 const GRAPH_NAME = 'knowledge_graph';
 
 /**
@@ -19,6 +20,7 @@ async function queryFalkorDB(query: string, params: Record<string, unknown> = {}
   const client = new Redis({
     host: FALKORDB_HOST,
     port: parseInt(FALKORDB_PORT, 10),
+    password: FALKORDB_PASSWORD,
     maxRetriesPerRequest: 3,
   });
 

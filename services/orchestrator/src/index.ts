@@ -15,12 +15,54 @@ config({ path: resolve(__dirname, '../../../.env') });
 import { redisClient } from './redis/client.js';
 import { falkordbClient } from './falkordb/client.js';
 import { buildWorkflow } from './langgraph/workflow.js';
+import { metricsCollector } from './metrics/collector.js';
+import { getReadyDeferredMessages } from './hts/index.js';
 
 const PORT = process.env['ORCHESTRATOR_PORT'] || 3002;
 const NODE_ENV = process.env['NODE_ENV'] || 'development';
 
 // Initialize workflow
 const workflow = buildWorkflow();
+
+/**
+ * Deferred message processor - processes messages that were queued during sleep hours
+ */
+async function startDeferredMessageProcessor() {
+  console.log('[Orchestrator] Starting deferred message processor...');
+
+  while (true) {
+    try {
+      // Check for deferred messages every minute
+      await new Promise((resolve) => setTimeout(resolve, 60000));
+
+      const readyMessages = await getReadyDeferredMessages();
+
+      if (readyMessages.length > 0) {
+        console.log(`[Orchestrator] Processing ${readyMessages.length} deferred message(s)...`);
+
+        for (const msg of readyMessages) {
+          try {
+            // Re-queue the message for normal processing
+            const payload = JSON.stringify({
+              messageId: msg.messageId,
+              contactId: msg.contactId,
+              contactName: 'Unknown', // Could be enhanced to retrieve from cache
+              content: msg.content,
+              timestamp: Date.now(),
+            });
+
+            await redisClient.client.xadd('QUEUE:messages', '*', 'payload', payload);
+            console.log(`[Orchestrator] Re-queued deferred message from ${msg.contactId}`);
+          } catch (error) {
+            console.error('[Orchestrator] Error re-queueing deferred message:', error);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Orchestrator] Error in deferred message processor:', error);
+    }
+  }
+}
 
 /**
  * Message consumer loop - consumes messages from Gateway and processes them
@@ -112,9 +154,18 @@ async function startOrchestratorService() {
 
     console.log('[Orchestrator] Workflow initialized');
 
+    // Start metrics publishing
+    metricsCollector.startPublishing(30000);
+    console.log('[Orchestrator] Metrics publishing started');
+
     // Start message consumer in background
     startMessageConsumer().catch((error) => {
       console.error('[Orchestrator] Message consumer crashed:', error);
+    });
+
+    // Start deferred message processor (for sleep hours feature)
+    startDeferredMessageProcessor().catch((error) => {
+      console.error('[Orchestrator] Deferred message processor crashed:', error);
     });
 
     console.log(`[Orchestrator] Orchestrator service ready on port ${PORT}`);
@@ -129,6 +180,9 @@ async function shutdown() {
   console.log('[Orchestrator] Shutting down gracefully...');
 
   try {
+    // Stop metrics publishing
+    metricsCollector.stopPublishing();
+
     await redisClient.quit();
     await falkordbClient.quit();
     console.log('[Orchestrator] Orchestrator service shut down');

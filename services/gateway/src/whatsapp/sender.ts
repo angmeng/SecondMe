@@ -1,10 +1,29 @@
 /**
  * WhatsApp Message Sender
+ * T094, T098: Enhanced message sending with HTS (Human Typing Simulation)
  * Sends messages with typing indicator simulation for human-like behavior
  */
 
 import { Client } from 'whatsapp-web.js';
 import { io } from '../index.js';
+
+export interface SendMessageOptions {
+  /** Custom typing delay in ms (from HTS calculator) */
+  typingDelay?: number;
+  /** Think time portion of delay (for multi-phase typing) */
+  thinkTime?: number;
+  /** Whether to show typing indicator (default: true) */
+  simulateTyping?: boolean;
+  /** Whether to split into think + type phases (default: true if thinkTime provided) */
+  usePhaseTyping?: boolean;
+}
+
+export interface SendMessageResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+  actualDelayMs?: number;
+}
 
 export class MessageSender {
   private client: Client;
@@ -16,35 +35,64 @@ export class MessageSender {
   /**
    * Send message with typing indicator simulation
    * Implements HTS (Human Typing Simulation) timing
+   *
+   * If thinkTime is provided, we simulate a more realistic pattern:
+   * 1. Wait for thinkTime (simulating reading the message)
+   * 2. Start typing indicator
+   * 3. Wait for remaining time (typing simulation)
+   * 4. Send message
    */
   async sendMessage(
     contactId: string,
     content: string,
-    options: {
-      typingDelay?: number; // Custom typing delay in ms
-      simulateTyping?: boolean; // Whether to show typing indicator
-    } = {}
-  ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const { typingDelay = this.calculateTypingDelay(content), simulateTyping = true } = options;
+    options: SendMessageOptions = {}
+  ): Promise<SendMessageResult> {
+    const {
+      typingDelay = this.calculateTypingDelay(content),
+      thinkTime = 0,
+      simulateTyping = true,
+      usePhaseTyping = thinkTime > 0,
+    } = options;
+
+    const startTime = Date.now();
 
     try {
       console.log(
-        `[Gateway Sender] Sending message to ${contactId} (typing delay: ${typingDelay}ms)`
+        `[Gateway Sender] Sending message to ${contactId} (total delay: ${typingDelay}ms, think: ${thinkTime}ms)`
       );
 
-      // Start typing indicator
       if (simulateTyping) {
-        await this.startTyping(contactId);
+        if (usePhaseTyping && thinkTime > 0) {
+          // Phase 1: "Think" phase - user is reading/thinking (no typing indicator)
+          console.log(`[Gateway Sender] Phase 1: Thinking for ${thinkTime}ms`);
+          await this.sleep(thinkTime);
 
-        // Emit typing status to frontend
-        io.emit('typing_status', {
-          contactId,
-          isTyping: true,
-          timestamp: Date.now(),
-        });
+          // Phase 2: "Type" phase - user is typing
+          const typingTime = Math.max(typingDelay - thinkTime, 500);
+          console.log(`[Gateway Sender] Phase 2: Typing for ${typingTime}ms`);
 
-        // Wait for typing delay to simulate human typing
-        await this.sleep(typingDelay);
+          await this.startTyping(contactId);
+
+          io.emit('typing_status', {
+            contactId,
+            isTyping: true,
+            phase: 'typing',
+            timestamp: Date.now(),
+          });
+
+          await this.sleep(typingTime);
+        } else {
+          // Simple typing simulation (no think phase)
+          await this.startTyping(contactId);
+
+          io.emit('typing_status', {
+            contactId,
+            isTyping: true,
+            timestamp: Date.now(),
+          });
+
+          await this.sleep(typingDelay);
+        }
       }
 
       // Send the message
@@ -61,8 +109,9 @@ export class MessageSender {
         });
       }
 
+      const actualDelayMs = Date.now() - startTime;
       console.log(
-        `[Gateway Sender] Message sent successfully to ${contactId}: ${message.id._serialized}`
+        `[Gateway Sender] Message sent successfully to ${contactId}: ${message.id._serialized} (actual delay: ${actualDelayMs}ms)`
       );
 
       // Emit message sent event
@@ -70,11 +119,13 @@ export class MessageSender {
         contactId,
         messageId: message.id._serialized,
         timestamp: Date.now(),
+        delayMs: actualDelayMs,
       });
 
       return {
         success: true,
         messageId: message.id._serialized,
+        actualDelayMs,
       };
     } catch (error: any) {
       console.error(`[Gateway Sender] Error sending message to ${contactId}:`, error);

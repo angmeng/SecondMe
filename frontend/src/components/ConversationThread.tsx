@@ -1,11 +1,11 @@
 /**
  * Conversation Thread Component
- * User Story 2: Displays message thread with visual indicators for bot vs user messages
+ * T110: Displays message thread with pagination and visual indicators for bot vs user messages
  */
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Avatar from '@/components/ui/Avatar';
 
 interface Message {
@@ -16,12 +16,22 @@ interface Message {
   status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 }
 
+interface PaginationInfo {
+  currentPage: number;
+  totalPages: number;
+  totalMessages: number;
+  hasMore: boolean;
+}
+
 interface ConversationThreadProps {
   contactId: string;
   contactName: string;
   messages: Message[];
   isLoading?: boolean;
   onScrollTop?: () => void;
+  onLoadMore?: () => void;
+  pagination?: PaginationInfo;
+  pageSize?: number;
 }
 
 export default function ConversationThread({
@@ -30,17 +40,34 @@ export default function ConversationThread({
   messages,
   isLoading = false,
   onScrollTop,
+  onLoadMore,
+  pagination,
+  pageSize = 50,
 }: ConversationThreadProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const prevScrollHeight = useRef<number>(0);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive (only for new messages, not loaded history)
   useEffect(() => {
+    // Don't auto-scroll if we just loaded more messages (scroll height changed significantly)
+    const container = containerRef.current;
+    if (container && prevScrollHeight.current > 0) {
+      const heightDiff = container.scrollHeight - prevScrollHeight.current;
+      if (heightDiff > 500) {
+        // We loaded more messages, maintain scroll position
+        container.scrollTop = heightDiff;
+        prevScrollHeight.current = 0;
+        return;
+      }
+    }
     scrollToBottom();
   }, [messages]);
 
-  // Track scroll position
+  // Track scroll position for infinite scroll
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -53,15 +80,37 @@ export default function ConversationThread({
         container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
       setShowScrollButton(!isAtBottom);
 
-      // Trigger load more when scrolled to top
-      if (container.scrollTop === 0 && onScrollTop) {
-        onScrollTop();
+      // Trigger load more when scrolled near top (within 100px)
+      if (container.scrollTop < 100 && !isLoading && !isLoadingMore) {
+        if (onScrollTop) {
+          onScrollTop();
+        }
+        if (onLoadMore && pagination?.hasMore) {
+          handleLoadMore();
+        }
       }
     }
 
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
-  }, [onScrollTop]);
+  }, [onScrollTop, onLoadMore, pagination?.hasMore, isLoading, isLoadingMore]);
+
+  // Handle load more with scroll position preservation
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingMore || !onLoadMore || !pagination?.hasMore) return;
+
+    const container = containerRef.current;
+    if (container) {
+      prevScrollHeight.current = container.scrollHeight;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      await onLoadMore();
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, onLoadMore, pagination?.hasMore]);
 
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -151,18 +200,52 @@ export default function ConversationThread({
         ref={containerRef}
         className="flex-1 overflow-y-auto px-4 py-4"
       >
-        {/* Loading indicator at top */}
-        {isLoading && (
-          <div className="mb-4 flex justify-center">
-            <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Loading older messages...
+        {/* Load More / Pagination Controls at top */}
+        <div ref={loadMoreRef} className="mb-4">
+          {/* Loading indicator */}
+          {(isLoading || isLoadingMore) && (
+            <div className="flex justify-center mb-2">
+              <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Loading older messages...
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Load More Button */}
+          {!isLoading && !isLoadingMore && pagination?.hasMore && onLoadMore && (
+            <div className="flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                className="flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                </svg>
+                Load older messages
+              </button>
+            </div>
+          )}
+
+          {/* All messages loaded indicator */}
+          {!isLoading && !isLoadingMore && pagination && !pagination.hasMore && messages.length > pageSize && (
+            <div className="flex justify-center">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                Beginning of conversation
+              </span>
+            </div>
+          )}
+
+          {/* Pagination info */}
+          {pagination && pagination.totalMessages > 0 && (
+            <div className="mt-2 text-center text-xs text-slate-400 dark:text-slate-500">
+              Showing {messages.length} of {pagination.totalMessages} messages
+            </div>
+          )}
+        </div>
 
         {/* Empty state */}
         {messages.length === 0 && !isLoading && (

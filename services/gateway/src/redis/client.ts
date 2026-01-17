@@ -236,6 +236,23 @@ class RedisClient {
   async deleteResponse(id: string): Promise<void> {
     await this.client.xdel('QUEUE:responses', id);
   }
+
+  /**
+   * Cache contacts list with 5-minute TTL
+   */
+  async cacheContacts(contacts: any[]): Promise<void> {
+    await this.client.setex('CONTACTS:list', 300, JSON.stringify(contacts));
+    await this.client.set('CONTACTS:lastUpdated', Date.now().toString());
+    console.log(`[Gateway Redis] Cached ${contacts.length} contacts`);
+  }
+
+  /**
+   * Get cached contacts list
+   */
+  async getCachedContacts(): Promise<any[] | null> {
+    const cached = await this.client.get('CONTACTS:list');
+    return cached ? JSON.parse(cached) : null;
+  }
 }
 
 // Export singleton instance

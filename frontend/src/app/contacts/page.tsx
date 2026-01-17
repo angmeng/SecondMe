@@ -10,11 +10,19 @@ import ContactList, { Contact } from '@/components/ContactList';
 import { socketClient } from '@/lib/socket';
 import Link from 'next/link';
 
+interface SleepStatus {
+  isSleeping: boolean;
+  wakesUpAt?: number;
+  minutesUntilWakeUp?: number;
+}
+
 export default function ContactsPage() {
   const [isConnected, setIsConnected] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [sleepStatus, setSleepStatus] = useState<SleepStatus>({ isSleeping: false });
+  const [showHelp, setShowHelp] = useState(false);
 
   // Calculate dynamic stats from contacts
   const totalContacts = contacts.length;
@@ -30,40 +38,111 @@ export default function ContactsPage() {
     socketClient.onConnectionStatus(handleConnectionStatus);
     setIsConnected(socket.connected);
 
+    // Fetch sleep status
+    fetchSleepStatus();
+
     return () => {
       socketClient.offConnectionStatus(handleConnectionStatus);
     };
   }, []);
 
-  // Load contacts (placeholder - will be implemented with real WhatsApp contact fetching)
+  async function fetchSleepStatus() {
+    try {
+      const response = await fetch('/api/settings?section=sleep_hours');
+      if (response.ok) {
+        const data = await response.json();
+        setSleepStatus(data.status);
+      }
+    } catch (err) {
+      console.error('[ContactsPage] Error fetching sleep status:', err);
+    }
+  }
+
+  function formatWakeUpTime(timestamp?: number): string {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  // Handle "How it works" help section visibility with localStorage
   useEffect(() => {
-    const loadPlaceholderContacts = () => {
-      setTimeout(() => {
-        const placeholderContacts: Contact[] = [
-          {
-            id: '1234567890@c.us',
-            name: 'John Doe',
-            isPaused: false,
-          },
-          {
-            id: '0987654321@c.us',
-            name: 'Jane Smith',
-            isPaused: false,
-          },
-          {
-            id: '5555555555@c.us',
-            name: 'Test Contact',
-            isPaused: true,
-            pauseReason: 'manual',
-          },
-        ];
+    const helpPreference = localStorage.getItem('contacts-help-shown');
+    if (helpPreference === null) {
+      // First-time visitor: expand and save preference
+      setShowHelp(true);
+      localStorage.setItem('contacts-help-shown', 'true');
+    } else {
+      // Returning visitor: respect saved collapsed/expanded state
+      setShowHelp(helpPreference === 'true');
+    }
+  }, []);
 
-        setContacts(placeholderContacts);
-        setIsLoading(false);
-      }, 800);
-    };
+  function toggleHelp() {
+    setShowHelp((prev) => {
+      const newValue = !prev;
+      localStorage.setItem('contacts-help-shown', String(newValue));
+      return newValue;
+    });
+  }
 
-    loadPlaceholderContacts();
+  // Fetch contacts from cache
+  async function fetchContacts() {
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/contacts');
+      const data = await response.json();
+
+      if (data.error) {
+        console.error('[ContactsPage] API error:', data.error);
+        setContacts([]);
+        return;
+      }
+
+      const mapped: Contact[] = (data.contacts || []).map((c: any) => ({
+        id: c.id,
+        name: c.name || c.phoneNumber || 'Unknown',
+        isPaused: c.isPaused || false,
+        pauseReason: c.isPaused ? 'manual' : undefined,
+        expiresAt: c.expiresAt,
+      }));
+
+      setContacts(mapped);
+    } catch (err) {
+      console.error('[ContactsPage] Error fetching contacts:', err);
+      setContacts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  // Refresh contacts from WhatsApp (re-fetch from source)
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    try {
+      const response = await fetch('/api/contacts/refresh', { method: 'POST' });
+      const data = await response.json();
+
+      if (data.error) {
+        console.error('[ContactsPage] Refresh error:', data.error);
+      } else {
+        console.log(`[ContactsPage] Refreshed ${data.count} contacts`);
+      }
+
+      // Re-fetch contacts from cache after refresh
+      await fetchContacts();
+    } catch (err) {
+      console.error('[ContactsPage] Error refreshing contacts:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchContacts();
   }, []);
 
   return (
@@ -81,8 +160,8 @@ export default function ContactsPage() {
               </p>
             </div>
 
-            {/* Stats summary */}
-            <div className="flex gap-4">
+            {/* Stats summary and refresh button */}
+            <div className="flex items-center gap-4">
               <div className="rounded-lg border border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalContacts}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Total Contacts</p>
@@ -91,9 +170,68 @@ export default function ContactsPage() {
                 <p className="text-2xl font-bold text-success-600 dark:text-success-400">{activeContacts}</p>
                 <p className="text-xs text-success-600 dark:text-success-400">Active</p>
               </div>
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing || !isConnected}
+                className="btn btn-sm flex items-center gap-2 border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                title={!isConnected ? 'Connect WhatsApp first' : 'Refresh contacts from WhatsApp'}
+              >
+                <svg
+                  className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
           </div>
         </header>
+
+        {/* Sleep Status Banner - T102 */}
+        {sleepStatus.isSleeping && (
+          <div className="mb-6 animate-fade-in rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-900/50 dark:bg-purple-900/20">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
+                <svg
+                  className="h-5 w-5 text-purple-600 dark:text-purple-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+                  />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                  Bot is sleeping
+                </p>
+                <p className="text-xs text-purple-600 dark:text-purple-400">
+                  The bot won't respond to messages until {formatWakeUpTime(sleepStatus.wakesUpAt)}{' '}
+                  ({sleepStatus.minutesUntilWakeUp} minutes)
+                </p>
+              </div>
+              <Link
+                href="/persona"
+                className="btn btn-sm border-purple-300 text-purple-700 hover:bg-purple-100 dark:border-purple-700 dark:text-purple-300 dark:hover:bg-purple-800/50"
+              >
+                Configure
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Connection Warning */}
         {!isConnected && (
@@ -130,52 +268,15 @@ export default function ContactsPage() {
           </div>
         )}
 
-        {/* Search and Filter Bar */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          {/* Search input */}
-          <div className="relative flex-1 sm:max-w-xs">
-            <svg
-              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-            <input
-              type="text"
-              placeholder="Search contacts..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10"
-            />
-          </div>
-
-          {/* Filter buttons */}
-          <div className="flex gap-2">
-            <button className="btn btn-sm btn-secondary">
-              All
-            </button>
-            <button className="btn btn-sm btn-ghost">
-              Active
-            </button>
-            <button className="btn btn-sm btn-ghost">
-              Paused
-            </button>
-          </div>
-        </div>
-
         {/* Contact List */}
         <ContactList contacts={contacts} setContacts={setContacts} isLoading={isLoading} />
 
-        {/* Help Section */}
+        {/* Help Section - Collapsible */}
         <div className="mt-8 card animate-fade-in-up" style={{ animationDelay: '200ms' }}>
-          <div className="flex items-start gap-4">
+          <button
+            onClick={toggleHelp}
+            className="flex w-full items-center gap-4 text-left"
+          >
             <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400">
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
@@ -190,7 +291,30 @@ export default function ContactsPage() {
               <h3 className="font-semibold text-slate-900 dark:text-white">
                 How it works
               </h3>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            </div>
+            <svg
+              className={`h-5 w-5 flex-shrink-0 text-slate-400 transition-transform duration-200 ${
+                showHelp ? 'rotate-180' : ''
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+          <div
+            className={`grid overflow-hidden transition-all duration-300 ease-in-out ${
+              showHelp ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   {
                     title: 'Enable bot',

@@ -10,7 +10,7 @@ const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
 const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 
 class RedisClient {
-  private client: Redis;
+  public client: Redis; // Made public for direct access when needed
   private isInitialized = false;
 
   constructor() {
@@ -151,6 +151,126 @@ class RedisClient {
     return keys
       .filter((key) => key !== 'PAUSE:ALL')
       .map((key) => key.replace('PAUSE:', ''));
+  }
+
+  /**
+   * Sleep Hours Configuration
+   */
+
+  /**
+   * Get sleep hours configuration
+   */
+  async getSleepHoursConfig(): Promise<{
+    enabled: boolean;
+    startHour: number;
+    startMinute: number;
+    endHour: number;
+    endMinute: number;
+    timezoneOffset: number;
+  }> {
+    await this.ensureConnected();
+
+    const cached = await this.client.get('CONFIG:sleep_hours');
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
+    // Default config
+    return {
+      enabled: true,
+      startHour: 23,
+      startMinute: 0,
+      endHour: 7,
+      endMinute: 0,
+      timezoneOffset: 0,
+    };
+  }
+
+  /**
+   * Update sleep hours configuration
+   */
+  async setSleepHoursConfig(config: {
+    enabled?: boolean;
+    startHour?: number;
+    startMinute?: number;
+    endHour?: number;
+    endMinute?: number;
+    timezoneOffset?: number;
+  }): Promise<void> {
+    await this.ensureConnected();
+
+    const currentConfig = await this.getSleepHoursConfig();
+    const newConfig = { ...currentConfig, ...config };
+
+    await this.client.set('CONFIG:sleep_hours', JSON.stringify(newConfig));
+    console.log('[Frontend Redis] Sleep hours config updated:', newConfig);
+  }
+
+  /**
+   * Check if currently in sleep hours
+   */
+  async isSleepHoursActive(): Promise<{
+    isSleeping: boolean;
+    wakesUpAt?: number;
+    minutesUntilWakeUp?: number;
+  }> {
+    await this.ensureConnected();
+
+    const config = await this.getSleepHoursConfig();
+
+    if (!config.enabled) {
+      return { isSleeping: false };
+    }
+
+    // Apply timezone offset to get local time
+    const now = new Date();
+    const localTime = new Date(now.getTime() + config.timezoneOffset * 60 * 60 * 1000);
+    const currentHour = localTime.getUTCHours();
+    const currentMinute = localTime.getUTCMinutes();
+    const currentTotalMinutes = currentHour * 60 + currentMinute;
+
+    const sleepStartMinutes = config.startHour * 60 + config.startMinute;
+    const sleepEndMinutes = config.endHour * 60 + config.endMinute;
+
+    let isSleeping: boolean;
+
+    // Handle sleep period crossing midnight
+    if (sleepStartMinutes > sleepEndMinutes) {
+      isSleeping = currentTotalMinutes >= sleepStartMinutes || currentTotalMinutes < sleepEndMinutes;
+    } else {
+      isSleeping = currentTotalMinutes >= sleepStartMinutes && currentTotalMinutes < sleepEndMinutes;
+    }
+
+    if (isSleeping) {
+      // Calculate wake up time
+      const wakeUp = new Date(now);
+      wakeUp.setUTCHours(config.endHour - config.timezoneOffset);
+      wakeUp.setUTCMinutes(config.endMinute);
+      wakeUp.setUTCSeconds(0);
+      wakeUp.setUTCMilliseconds(0);
+
+      if (wakeUp.getTime() <= now.getTime()) {
+        wakeUp.setUTCDate(wakeUp.getUTCDate() + 1);
+      }
+
+      const minutesUntilWakeUp = Math.ceil((wakeUp.getTime() - now.getTime()) / 60000);
+
+      return {
+        isSleeping: true,
+        wakesUpAt: wakeUp.getTime(),
+        minutesUntilWakeUp,
+      };
+    }
+
+    return { isSleeping: false };
+  }
+
+  /**
+   * Get count of deferred messages (messages queued during sleep hours)
+   */
+  async getDeferredMessageCount(): Promise<number> {
+    await this.ensureConnected();
+    return this.client.zcard('DEFERRED:messages');
   }
 
   /**
