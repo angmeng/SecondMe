@@ -209,27 +209,27 @@ This is a web application with microservices architecture:
 
 ### US3 - Orchestrator Service (HTS Algorithm)
 
-- [ ] T088 [P] [US3] Implement typing delay calculator at services/orchestrator/src/hts/delay-calculator.ts using formula: (words * 300) + random(2000, 5000)
-- [ ] T089 [P] [US3] Implement sleep hours checker at services/orchestrator/src/hts/sleep-hours.ts querying User node for sleepHoursStart/End
-- [ ] T090 [US3] Update workflow to calculate typing delay before sending response
-- [ ] T091 [US3] Update workflow to check sleep hours and defer messages until wake time
-- [ ] T092 [US3] Implement deferred message queue in Redis for messages waiting until after sleep hours
-- [ ] T093 [US3] Pass calculated typingDelayMs to Gateway via response payload
+- [X] T088 [P] [US3] Implement typing delay calculator at services/orchestrator/src/hts/delay-calculator.ts using formula: (words * 300) + random(2000, 5000)
+- [X] T089 [P] [US3] Implement sleep hours checker at services/orchestrator/src/hts/sleep-hours.ts querying User node for sleepHoursStart/End
+- [X] T090 [US3] Update workflow to calculate typing delay before sending response
+- [X] T091 [US3] Update workflow to check sleep hours and defer messages until wake time
+- [X] T092 [US3] Implement deferred message queue in Redis for messages waiting until after sleep hours
+- [X] T093 [US3] Pass calculated typingDelayMs to Gateway via response payload
 
 ### US3 - Gateway Service (Typing Simulation & Session Management)
 
-- [ ] T094 [US3] Update sender.ts to implement sendWithTyping function using chat.sendStateTyping() and delay
-- [ ] T095 [US3] Implement session expiry tracker at services/gateway/src/whatsapp/session-manager.ts with 24-hour TTL
-- [ ] T096 [US3] Implement session refresh logic to update SESSION:{userId} Redis key on activity
-- [ ] T097 [US3] Emit session expiry event when 24 hours elapsed to trigger QR re-auth requirement
-- [ ] T098 [US3] Update message sender to respect typingDelayMs parameter: start typing → wait → stop typing → send
+- [X] T094 [US3] Update sender.ts to implement sendWithTyping function using chat.sendStateTyping() and delay
+- [X] T095 [US3] Implement session expiry tracker at services/gateway/src/whatsapp/session-manager.ts with 24-hour TTL
+- [X] T096 [US3] Implement session refresh logic to update SESSION:{userId} Redis key on activity
+- [X] T097 [US3] Emit session expiry event when 24 hours elapsed to trigger QR re-auth requirement
+- [X] T098 [US3] Update message sender to respect typingDelayMs parameter: start typing → wait → stop typing → send
 
 ### US3 - Frontend Dashboard (Sleep Hours Configuration)
 
-- [ ] T099 [P] [US3] Add sleep hours configuration to persona/settings page
-- [ ] T100 [US3] Create Server Action to update User node sleepHoursStart/End in FalkorDB
-- [ ] T101 [US3] Display session expiry countdown on dashboard home page
-- [ ] T102 [US3] Show "Sleeping" status indicator when within sleep hours on contacts page
+- [X] T099 [P] [US3] Add sleep hours configuration to persona/settings page
+- [X] T100 [US3] Create Server Action to update User node sleepHoursStart/End in FalkorDB
+- [X] T101 [US3] Display session expiry countdown on dashboard home page
+- [X] T102 [US3] Show "Sleeping" status indicator when within sleep hours on contacts page
 
 **Checkpoint**: All user stories should now be independently functional
 - HTS delays make bot responses appear human
@@ -253,22 +253,22 @@ This is a web application with microservices architecture:
 
 ### US4 - Frontend Dashboard (Enhanced Monitoring UI)
 
-- [ ] T103 [P] [US4] Create metrics display component at frontend/src/components/MetricsDisplay.tsx showing message count, token usage, costs
-- [ ] T104 [P] [US4] Create bot status component at frontend/src/components/BotStatus.tsx with connection indicator and uptime
-- [ ] T105 [US4] Implement Server Action at frontend/src/app/api/status/route.ts to fetch connection status from Gateway
-- [ ] T106 [US4] Add real-time metrics updates using Socket.io subscription to status events
-- [ ] T107 [P] [US4] Create activity log component at frontend/src/components/ActivityLog.tsx showing recent bot actions
-- [ ] T108 [US4] Implement log streaming from Redis pub/sub to dashboard via Socket.io
-- [ ] T109 [US4] Add contact search/filter functionality to contacts list
-- [ ] T110 [US4] Add pagination to conversation thread for long chat histories
+- [X] T103 [P] [US4] Create metrics display component at frontend/src/components/MetricsDisplay.tsx showing message count, token usage, costs
+- [X] T104 [P] [US4] Create bot status component at frontend/src/components/BotStatus.tsx with connection indicator and uptime
+- [X] T105 [US4] Implement Server Action at frontend/src/app/api/status/route.ts to fetch connection status from Gateway
+- [X] T106 [US4] Add real-time metrics updates using Socket.io subscription to status events
+- [X] T107 [P] [US4] Create activity log component at frontend/src/components/ActivityLog.tsx showing recent bot actions
+- [X] T108 [US4] Implement log streaming from Redis pub/sub to dashboard via Socket.io
+- [X] T109 [US4] Add contact search/filter functionality to contacts list
+- [X] T110 [US4] Add pagination to conversation thread for long chat histories
 
 ### US4 - Backend Services (Metrics & Monitoring)
 
-- [ ] T111 [P] [US4] Implement metrics collector at services/orchestrator/src/metrics/collector.ts tracking tokens, costs, latency
-- [ ] T112 [US4] Publish metrics to Redis pub/sub on events:metrics channel
-- [ ] T113 [P] [US4] Implement health check endpoints for all services (Gateway /health, Orchestrator /health, Graph Worker /health)
-- [ ] T114 [US4] Implement connection status polling in Gateway and publish to events:status channel
-- [ ] T115 [US4] Implement audit logging to file system at logs/messages.jsonl with metadata only (no content)
+- [X] T111 [P] [US4] Implement metrics collector at services/orchestrator/src/metrics/collector.ts tracking tokens, costs, latency
+- [X] T112 [US4] Publish metrics to Redis pub/sub on events:metrics channel
+- [X] T113 [P] [US4] Implement health check endpoints for all services (Gateway /health, Orchestrator /health, Graph Worker /health)
+- [X] T114 [US4] Implement connection status polling in Gateway and publish to events:status channel
+- [X] T115 [US4] Implement audit logging to file system at logs/messages.jsonl with metadata only (no content)
 
 **Checkpoint**: Dashboard provides comprehensive monitoring and control
 - Real-time status updates for all bot activity
