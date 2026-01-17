@@ -12,13 +12,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 config({ path: resolve(__dirname, '../../../.env') });
 
+import express, { Request, Response } from 'express';
 import { redisClient } from './redis/client.js';
 import { falkordbClient } from './falkordb/client.js';
 import { startConsumer, stopConsumer } from './redis/consumer.js';
 
 const SERVICE_NAME = 'Graph Worker';
+const PORT = process.env['GRAPH_WORKER_PORT'] || 3003;
 const CHAT_HISTORY_QUEUE = 'QUEUE:chat_history';
 const USE_NEW_CONSUMER = process.env['USE_NEW_CONSUMER'] !== 'false'; // Enable new consumer by default
+
+// Express app for health endpoint
+const app = express();
 
 async function startGraphWorkerService() {
   console.log(`[${SERVICE_NAME}] Starting Graph Worker Service...`);
@@ -33,6 +38,48 @@ async function startGraphWorkerService() {
     await falkordbClient.connect();
 
     console.log(`[${SERVICE_NAME}] Graph Worker Service started successfully`);
+
+    // Health endpoint (T113)
+    app.get('/health', async (_req: Request, res: Response) => {
+      try {
+        // Check Redis status
+        const redisOk = redisClient.status === 'ready';
+
+        // Check FalkorDB via ping
+        let falkorOk = false;
+        try {
+          await falkordbClient.query('RETURN 1');
+          falkorOk = true;
+        } catch {
+          falkorOk = false;
+        }
+
+        const status = redisOk && falkorOk ? 'healthy' : 'degraded';
+        const checks = [
+          { name: 'redis', status: redisOk ? 'pass' : 'fail' as const },
+          { name: 'falkordb', status: falkorOk ? 'pass' : 'fail' as const },
+        ];
+
+        res.status(status === 'healthy' ? 200 : 503).json({
+          status,
+          service: 'graph-worker',
+          checks,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        res.status(503).json({
+          status: 'unhealthy',
+          service: 'graph-worker',
+          error: error instanceof Error ? error.message : 'Health check failed',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // Start HTTP server
+    app.listen(PORT, () => {
+      console.log(`[${SERVICE_NAME}] HTTP server listening on port ${PORT}`);
+    });
 
     if (USE_NEW_CONSUMER) {
       // Use the new consumer with entity extraction

@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 config({ path: resolve(__dirname, '../../../.env') });
 
+import express, { Request, Response } from 'express';
 import { redisClient } from './redis/client.js';
 import { falkordbClient } from './falkordb/client.js';
 import { buildWorkflow } from './langgraph/workflow.js';
@@ -20,6 +21,9 @@ import { getReadyDeferredMessages } from './hts/index.js';
 
 const PORT = process.env['ORCHESTRATOR_PORT'] || 3002;
 const NODE_ENV = process.env['NODE_ENV'] || 'development';
+
+// Express app for health endpoint
+const app = express();
 
 // Initialize workflow
 const workflow = buildWorkflow();
@@ -157,6 +161,31 @@ async function startOrchestratorService() {
     // Start metrics publishing
     metricsCollector.startPublishing(30000);
     console.log('[Orchestrator] Metrics publishing started');
+
+    // Health endpoint (T113)
+    app.get('/health', async (_req: Request, res: Response) => {
+      try {
+        const health = await metricsCollector.getHealthStatus();
+        res.status(health.status === 'healthy' ? 200 : 503).json({
+          status: health.status,
+          service: 'orchestrator',
+          checks: health.checks,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        res.status(503).json({
+          status: 'unhealthy',
+          service: 'orchestrator',
+          error: error instanceof Error ? error.message : 'Health check failed',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    });
+
+    // Start HTTP server
+    app.listen(PORT, () => {
+      console.log(`[Orchestrator] HTTP server listening on port ${PORT}`);
+    });
 
     // Start message consumer in background
     startMessageConsumer().catch((error) => {
