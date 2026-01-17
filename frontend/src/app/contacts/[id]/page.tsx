@@ -5,12 +5,13 @@
 
 'use client';
 
-import { useState, useEffect, use } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ConversationThread from '@/components/ConversationThread';
 import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
+import PersonaSelector from '@/components/PersonaSelector';
 import { socketClient } from '@/lib/socket';
 
 interface Contact {
@@ -20,6 +21,7 @@ interface Contact {
   relationshipType: string;
   botEnabled: boolean;
   assignedPersona?: string;
+  assignedPersonaName?: string;
   lastInteraction?: number;
 }
 
@@ -33,7 +35,6 @@ interface Message {
 
 export default function ConversationPage() {
   const params = useParams();
-  const router = useRouter();
   const contactId = params?.id as string;
 
   const [contact, setContact] = useState<Contact | null>(null);
@@ -58,21 +59,31 @@ export default function ConversationPage() {
     setError(null);
 
     try {
-      // Load contact info and messages in parallel
-      // For MVP, using placeholder data until API is implemented
-      await loadPlaceholderData();
+      // Try to load contact from API
+      const contactResponse = await fetch(`/api/contacts/${contactId}`);
+
+      if (contactResponse.ok) {
+        const { contact: contactData } = await contactResponse.json();
+        setContact(contactData);
+      } else {
+        // Fall back to placeholder if API fails
+        console.warn('[ConversationPage] Contact API failed, using placeholder');
+        await loadPlaceholderContact();
+      }
+
+      // Load placeholder messages (messages API not implemented yet)
+      loadPlaceholderMessages();
     } catch (err: any) {
       console.error('[ConversationPage] Error loading data:', err);
-      setError(err.message || 'Failed to load conversation');
+      // Fall back to placeholder on error
+      await loadPlaceholderContact();
+      loadPlaceholderMessages();
     } finally {
       setIsLoading(false);
     }
   }
 
-  async function loadPlaceholderData() {
-    // Simulate loading delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
+  async function loadPlaceholderContact() {
     // Placeholder contact
     const placeholderContact: Contact = {
       id: contactId,
@@ -82,6 +93,10 @@ export default function ConversationPage() {
       botEnabled: true,
     };
 
+    setContact(placeholderContact);
+  }
+
+  function loadPlaceholderMessages() {
     // Placeholder messages
     const placeholderMessages: Message[] = [
       {
@@ -128,7 +143,6 @@ export default function ConversationPage() {
       },
     ];
 
-    setContact(placeholderContact);
     setMessages(placeholderMessages);
   }
 
@@ -242,6 +256,20 @@ export default function ConversationPage() {
                 </span>
               </div>
             </div>
+
+            {/* Persona Selector */}
+            <PersonaSelector
+              contactId={contact.id}
+              currentPersonaId={contact.assignedPersona}
+              currentPersonaName={contact.assignedPersonaName}
+              onPersonaChange={(personaId, personaName) => {
+                setContact({
+                  ...contact,
+                  assignedPersona: personaId || undefined,
+                  assignedPersonaName: personaName || undefined,
+                });
+              }}
+            />
           </div>
 
           {/* Actions */}

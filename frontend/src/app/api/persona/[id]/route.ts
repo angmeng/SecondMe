@@ -14,7 +14,10 @@ const GRAPH_NAME = 'knowledge_graph';
 /**
  * Execute a Cypher query against FalkorDB
  */
-async function queryFalkorDB(query: string, params: Record<string, unknown> = {}): Promise<unknown[]> {
+async function queryFalkorDB(
+  query: string,
+  params: Record<string, unknown> = {}
+): Promise<unknown[]> {
   const Redis = (await import('ioredis')).default;
 
   const client = new Redis({
@@ -25,14 +28,15 @@ async function queryFalkorDB(query: string, params: Record<string, unknown> = {}
   });
 
   try {
-    const paramsJson = JSON.stringify(params);
-    const result = await client.call(
-      'GRAPH.QUERY',
-      GRAPH_NAME,
-      query,
-      '--params',
-      paramsJson
-    );
+    // Build CYPHER prefix with parameters
+    // FalkorDB requires: CYPHER param1=value1 param2=value2 MATCH ...
+    const cypherPrefix = Object.entries(params)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(' ');
+
+    const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${query}` : query;
+
+    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
 
     return parseGraphResult(result);
   } finally {
@@ -50,13 +54,18 @@ function parseGraphResult(result: unknown): unknown[] {
 
   const [header, data] = result;
 
+  // Handle write queries that return empty headers (e.g., DETACH DELETE)
+  if (!header || !Array.isArray(header) || header.length === 0) {
+    return [];
+  }
+
   if (!data || !Array.isArray(data) || data.length === 0) {
     return [];
   }
 
   return data.map((row: unknown[]) => {
     const obj: Record<string, unknown> = {};
-    (header as string[]).forEach((colName: string, index: number) => {
+    header.forEach((colName: string, index: number) => {
       obj[colName] = row[index];
     });
     return obj;
@@ -70,10 +79,7 @@ interface RouteParams {
 /**
  * GET /api/persona/[id] - Get a single persona
  */
-export async function GET(
-  request: NextRequest,
-  { params }: RouteParams
-) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
@@ -87,10 +93,7 @@ export async function GET(
     const results = await queryFalkorDB(query, { personaId: id });
 
     if (results.length === 0) {
-      return NextResponse.json(
-        { error: 'Persona not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
     }
 
     const row = results[0] as Record<string, unknown>;
@@ -106,20 +109,14 @@ export async function GET(
     return NextResponse.json(persona);
   } catch (error: unknown) {
     console.error('[Persona API] Error fetching persona:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch persona' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch persona' }, { status: 500 });
   }
 }
 
 /**
  * PATCH /api/persona/[id] - Update a persona
  */
-export async function PATCH(
-  request: NextRequest,
-  { params }: RouteParams
-) {
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
     const body = await request.json();
@@ -158,10 +155,7 @@ export async function PATCH(
     const results = await queryFalkorDB(query, queryParams);
 
     if (results.length === 0) {
-      return NextResponse.json(
-        { error: 'Persona not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
     }
 
     // Invalidate persona cache in Redis
@@ -189,47 +183,51 @@ export async function PATCH(
     });
   } catch (error: unknown) {
     console.error('[Persona API] Error updating persona:', error);
-    return NextResponse.json(
-      { error: 'Failed to update persona' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to update persona' }, { status: 500 });
   }
 }
 
 /**
  * DELETE /api/persona/[id] - Delete a persona
  */
-export async function DELETE(
-  request: NextRequest,
-  { params }: RouteParams
-) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
     // Prevent deletion of default personas
-    if (id.startsWith('persona-professional') || id.startsWith('persona-casual') || id.startsWith('persona-family')) {
-      return NextResponse.json(
-        { error: 'Cannot delete default personas' },
-        { status: 400 }
-      );
+    if (
+      id.startsWith('persona-professional') ||
+      id.startsWith('persona-casual') ||
+      id.startsWith('persona-family')
+    ) {
+      return NextResponse.json({ error: 'Cannot delete default personas' }, { status: 400 });
     }
 
-    const query = `
+    // First check if persona exists
+    const checkQuery = `
       MATCH (p:Persona {id: $personaId})
-      DETACH DELETE p
-      RETURN count(*) AS deleted
+      RETURN p.id AS id
     `;
 
-    await queryFalkorDB(query, { personaId: id });
+    const existing = await queryFalkorDB(checkQuery, { personaId: id });
+
+    if (existing.length === 0) {
+      return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
+    }
+
+    // Delete the persona
+    const deleteQuery = `
+      MATCH (p:Persona {id: $personaId})
+      DETACH DELETE p
+    `;
+
+    await queryFalkorDB(deleteQuery, { personaId: id });
 
     return NextResponse.json({
       message: 'Persona deleted successfully',
     });
   } catch (error: unknown) {
     console.error('[Persona API] Error deleting persona:', error);
-    return NextResponse.json(
-      { error: 'Failed to delete persona' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to delete persona' }, { status: 500 });
   }
 }

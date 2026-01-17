@@ -9,6 +9,7 @@ import {
   getContactInfo,
   getPersonaForContact,
   getDefaultPersona,
+  getPersonaById,
   PersonaContext,
 } from '../falkordb/queries.js';
 import { personaCache } from '../redis/persona-cache.js';
@@ -86,8 +87,22 @@ export async function personaNode(state: WorkflowState): Promise<Partial<Workflo
         };
       }
 
-      // Query FalkorDB for assigned persona (would need to implement getPersonaById)
-      // For now, fall through to relationship-based persona
+      // Query FalkorDB for assigned persona by ID
+      const assignedPersona = await getPersonaById(assignedPersonaId);
+      if (assignedPersona) {
+        // Cache the assigned persona
+        await personaCache.set(assignedPersonaId, assignedPersona);
+        console.log(`[Persona Node] Cached assigned persona ${assignedPersonaId}`);
+        return {
+          persona: assignedPersona,
+          personaCached: false,
+        };
+      }
+
+      // Assigned persona not found - log warning and fall back
+      console.warn(
+        `[Persona Node] Assigned persona ${assignedPersonaId} not found, falling back to relationship-based`
+      );
     }
 
     // Check cache for relationship-based persona
@@ -205,20 +220,45 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
 
 /**
  * Helper to get persona with cache check
+ * Prioritizes assigned persona over relationship-based selection
  */
 async function getPersonaWithCache(
   relationshipType: string,
   assignedPersonaId?: string
 ): Promise<{ persona: PersonaContext | null; cached: boolean }> {
-  // Check cache first
-  const cacheKey = assignedPersonaId || `relationship:${relationshipType}`;
+  // If contact has an assigned persona, use it
+  if (assignedPersonaId) {
+    // Check cache first for assigned persona
+    const cached = await personaCache.get(assignedPersonaId);
+    if (cached) {
+      console.log(`[Persona Cache] Found assigned persona ${assignedPersonaId} in cache`);
+      return { persona: cached, cached: true };
+    }
+
+    // Query FalkorDB for assigned persona by ID
+    const assignedPersona = await getPersonaById(assignedPersonaId);
+    if (assignedPersona) {
+      // Cache the assigned persona
+      await personaCache.set(assignedPersonaId, assignedPersona);
+      console.log(`[Persona Cache] Cached assigned persona ${assignedPersonaId}`);
+      return { persona: assignedPersona, cached: false };
+    }
+
+    // Assigned persona not found in DB - log warning and fall back to relationship-based
+    console.warn(
+      `[Persona Cache] Assigned persona ${assignedPersonaId} not found in DB, falling back to relationship-based selection`
+    );
+  }
+
+  // Relationship-based persona selection
+  const cacheKey = `relationship:${relationshipType}`;
   const cached = await personaCache.get(cacheKey);
 
   if (cached) {
     return { persona: cached, cached: true };
   }
 
-  // Query FalkorDB
+  // Query FalkorDB for relationship-based persona
   let persona = await getPersonaForContact(DEFAULT_USER_ID, relationshipType);
 
   if (!persona) {

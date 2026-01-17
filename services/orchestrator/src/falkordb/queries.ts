@@ -243,6 +243,43 @@ export async function getDefaultPersona(userId: string): Promise<PersonaContext 
 }
 
 /**
+ * Get persona by ID (for assigned persona lookups)
+ */
+export async function getPersonaById(personaId: string): Promise<PersonaContext | null> {
+  console.log(`[FalkorDB Queries] Getting persona by ID: ${personaId}`);
+
+  const query = `
+    MATCH (p:Persona {id: $personaId})
+    RETURN p.id AS id, p.name AS name, p.styleGuide AS styleGuide,
+           p.tone AS tone, p.exampleMessages AS exampleMessages,
+           p.applicableTo AS applicableTo
+    LIMIT 1
+  `;
+
+  try {
+    const results = await falkordbClient.query(query, { personaId });
+
+    if (results.length === 0) {
+      console.log(`[FalkorDB Queries] Persona ${personaId} not found`);
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id,
+      name: row.name,
+      styleGuide: row.styleGuide,
+      tone: row.tone,
+      exampleMessages: row.exampleMessages || [],
+      applicableTo: row.applicableTo || [],
+    };
+  } catch (error) {
+    console.error('[FalkorDB Queries] Error getting persona by ID:', error);
+    return null;
+  }
+}
+
+/**
  * Get contact information including relationship type
  */
 export async function getContactInfo(contactId: string): Promise<ContactInfo | null> {

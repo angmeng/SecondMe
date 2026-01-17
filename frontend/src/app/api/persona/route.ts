@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // FalkorDB configuration
 const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
 const FALKORDB_PORT = process.env['FALKORDB_PORT'] || '6379';
-const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'] || 'falkordb_default_password';
+const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'];
 const GRAPH_NAME = 'knowledge_graph';
 
 // Default user ID (single-user MVP)
@@ -24,19 +24,27 @@ async function queryFalkorDB(query: string, params: Record<string, unknown> = {}
   const client = new Redis({
     host: FALKORDB_HOST,
     port: parseInt(FALKORDB_PORT, 10),
-    password: FALKORDB_PASSWORD,
+    ...(FALKORDB_PASSWORD && { password: FALKORDB_PASSWORD }),
+    retryStrategy: (times: number) => {
+      const delay = Math.min(times * 50, 2000);
+      return delay;
+    },
     maxRetriesPerRequest: 3,
   });
 
   try {
-    const paramsJson = JSON.stringify(params);
-    const result = await client.call(
-      'GRAPH.QUERY',
-      GRAPH_NAME,
-      query,
-      '--params',
-      paramsJson
-    );
+    // Warmup: ensure connection is ready before executing query
+    await client.ping();
+
+    // Build CYPHER prefix with parameters
+    // FalkorDB requires: CYPHER param1=value1 param2=value2 MATCH ...
+    const cypherPrefix = Object.entries(params)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(' ');
+
+    const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${query}` : query;
+
+    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
 
     return parseGraphResult(result);
   } finally {
@@ -82,13 +90,27 @@ export async function GET() {
 
     const results = await queryFalkorDB(query, { userId: DEFAULT_USER_ID });
 
+    // Helper to parse JSON string arrays from FalkorDB
+    const parseArrayField = (value: unknown): string[] => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
+
     const personas = results.map((row: Record<string, unknown>) => ({
       id: row['id'],
       name: row['name'],
       styleGuide: row['styleGuide'],
       tone: row['tone'],
-      exampleMessages: row['exampleMessages'] || [],
-      applicableTo: row['applicableTo'] || [],
+      exampleMessages: parseArrayField(row['exampleMessages']),
+      applicableTo: parseArrayField(row['applicableTo']),
     }));
 
     return NextResponse.json({ personas });
@@ -118,7 +140,16 @@ export async function POST(request: NextRequest) {
 
     const personaId = `persona-${Date.now()}`;
 
-    const query = `
+    // Step 1: Ensure user exists
+    const ensureUserQuery = `
+      MERGE (u:User {id: $userId})
+      ON CREATE SET u.createdAt = timestamp()
+      RETURN u.id AS id
+    `;
+    await queryFalkorDB(ensureUserQuery, { userId: DEFAULT_USER_ID });
+
+    // Step 2: Create persona and link to user
+    const createPersonaQuery = `
       MATCH (u:User {id: $userId})
       CREATE (p:Persona {
         id: $personaId,
@@ -132,8 +163,7 @@ export async function POST(request: NextRequest) {
       CREATE (u)-[:HAS_PERSONA]->(p)
       RETURN p.id AS id
     `;
-
-    await queryFalkorDB(query, {
+    await queryFalkorDB(createPersonaQuery, {
       userId: DEFAULT_USER_ID,
       personaId,
       name,
