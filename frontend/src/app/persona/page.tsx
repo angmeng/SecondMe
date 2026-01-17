@@ -8,6 +8,7 @@
 import { useState, useEffect } from 'react';
 import PersonaEditor from '@/components/PersonaEditor';
 import SleepHoursConfig from '@/components/SleepHoursConfig';
+import CreatePersonaModal from '@/components/CreatePersonaModal';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import Link from 'next/link';
 
@@ -25,8 +26,10 @@ export default function PersonaPage() {
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   useEffect(() => {
     loadPersonas();
@@ -81,9 +84,7 @@ export default function PersonaPage() {
       // Update local state
       const updatedPersona = { ...selectedPersona, ...updates };
       setSelectedPersona(updatedPersona);
-      setPersonas((prev) =>
-        prev.map((p) => (p.id === selectedPersona.id ? updatedPersona : p))
-      );
+      setPersonas((prev) => prev.map((p) => (p.id === selectedPersona.id ? updatedPersona : p)));
 
       setSuccessMessage('Persona saved successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
@@ -92,6 +93,48 @@ export default function PersonaPage() {
       setError(err.message || 'Failed to save persona');
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function handlePersonaCreated(newPersona: Persona) {
+    setPersonas((prev) => [...prev, newPersona]);
+    setSelectedPersona(newPersona);
+    setIsCreateModalOpen(false);
+    setSuccessMessage('Persona created successfully');
+    setTimeout(() => setSuccessMessage(null), 3000);
+  }
+
+  async function handleDeletePersona(personaId: string) {
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/persona/${personaId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to delete persona');
+      }
+
+      // Remove from local state
+      const updatedPersonas = personas.filter((p) => p.id !== personaId);
+      setPersonas(updatedPersonas);
+
+      // Select another persona or clear selection
+      if (selectedPersona?.id === personaId) {
+        setSelectedPersona(updatedPersonas[0] ?? null);
+      }
+
+      setSuccessMessage('Persona deleted successfully');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: unknown) {
+      console.error('[PersonaPage] Error deleting persona:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete persona';
+      setError(errorMessage);
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -111,16 +154,8 @@ export default function PersonaPage() {
             </div>
 
             {/* Back to contacts */}
-            <Link
-              href="/contacts"
-              className="btn btn-secondary flex items-center gap-2"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+            <Link href="/contacts" className="btn btn-secondary flex items-center gap-2">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -150,9 +185,7 @@ export default function PersonaPage() {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <p className="text-sm text-success-700 dark:text-success-300">
-                {successMessage}
-              </p>
+              <p className="text-sm text-success-700 dark:text-success-300">{successMessage}</p>
             </div>
           </div>
         )}
@@ -228,8 +261,8 @@ export default function PersonaPage() {
                             persona.tone === 'formal'
                               ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                               : persona.tone === 'casual'
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                              : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                                : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                           }`}
                         >
                           {persona.tone}
@@ -242,18 +275,10 @@ export default function PersonaPage() {
                 {/* Add New Persona Button */}
                 <button
                   className="mt-4 w-full rounded-lg border-2 border-dashed border-slate-300 p-3 text-sm text-slate-500 transition-colors hover:border-slate-400 hover:text-slate-600 dark:border-slate-600 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-300"
-                  onClick={() => {
-                    // TODO: Implement create persona modal
-                    alert('Create new persona - coming soon!');
-                  }}
+                  onClick={() => setIsCreateModalOpen(true)}
                 >
                   <span className="flex items-center justify-center gap-2">
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -273,13 +298,13 @@ export default function PersonaPage() {
                 <PersonaEditor
                   persona={selectedPersona}
                   onSave={handleSavePersona}
+                  onDelete={handleDeletePersona}
                   isSaving={isSaving}
+                  isDeleting={isDeleting}
                 />
               ) : (
                 <div className="card flex items-center justify-center py-12">
-                  <p className="text-slate-500 dark:text-slate-400">
-                    Select a persona to edit
-                  </p>
+                  <p className="text-slate-500 dark:text-slate-400">Select a persona to edit</p>
                 </div>
               )}
             </div>
@@ -306,14 +331,11 @@ export default function PersonaPage() {
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-slate-900 dark:text-white">
-                About Personas
-              </h3>
+              <h3 className="font-semibold text-slate-900 dark:text-white">About Personas</h3>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                Personas define how the bot communicates on your behalf. Each persona has a
-                style guide that describes your writing patterns, tone, and example messages.
-                The bot uses these to match your authentic voice for different types of
-                relationships.
+                Personas define how the bot communicates on your behalf. Each persona has a style
+                guide that describes your writing patterns, tone, and example messages. The bot uses
+                these to match your authentic voice for different types of relationships.
               </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-3">
                 <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
@@ -345,6 +367,13 @@ export default function PersonaPage() {
           </div>
         </div>
       </div>
+
+      {/* Create Persona Modal */}
+      <CreatePersonaModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreated={handlePersonaCreated}
+      />
     </div>
   );
 }

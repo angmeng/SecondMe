@@ -19,24 +19,24 @@ interface Persona {
 interface PersonaEditorProps {
   persona: Persona;
   onSave: (updates: Partial<Persona>) => Promise<void>;
+  onDelete?: (personaId: string) => Promise<void>;
   isSaving: boolean;
+  isDeleting?: boolean;
 }
 
 const TONE_OPTIONS = ['formal', 'casual', 'friendly', 'professional', 'playful'];
 
-const RELATIONSHIP_OPTIONS = [
-  'colleague',
-  'client',
-  'manager',
-  'friend',
-  'acquaintance',
-  'family',
-];
+const RELATIONSHIP_OPTIONS = ['colleague', 'client', 'manager', 'friend', 'acquaintance', 'family'];
+
+// Default personas cannot be deleted
+const DEFAULT_PERSONA_IDS = ['persona-professional', 'persona-casual', 'persona-family'];
 
 export default function PersonaEditor({
   persona,
   onSave,
+  onDelete,
   isSaving,
+  isDeleting = false,
 }: PersonaEditorProps) {
   const [name, setName] = useState(persona.name);
   const [styleGuide, setStyleGuide] = useState(persona.styleGuide);
@@ -45,6 +45,9 @@ export default function PersonaEditor({
   const [applicableTo, setApplicableTo] = useState(persona.applicableTo);
   const [newExample, setNewExample] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const isDefaultPersona = DEFAULT_PERSONA_IDS.includes(persona.id);
 
   // Reset form when persona changes
   useEffect(() => {
@@ -105,19 +108,56 @@ export default function PersonaEditor({
     setApplicableTo(persona.applicableTo);
   }
 
+  async function handleDelete() {
+    if (onDelete) {
+      await onDelete(persona.id);
+      setShowDeleteConfirm(false);
+    }
+  }
+
   return (
     <div className="card">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between border-b border-slate-200 pb-4 dark:border-slate-700">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Edit Persona
-          </h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Edit Persona</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Customize how the bot communicates using this persona
           </p>
         </div>
         <div className="flex gap-2">
+          {/* Delete Button */}
+          {onDelete && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDefaultPersona || isDeleting || isSaving}
+              title={isDefaultPersona ? 'Default personas cannot be deleted' : 'Delete persona'}
+              className="btn btn-sm border-error-300 text-error-600 hover:bg-error-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-error-700 dark:text-error-400 dark:hover:bg-error-900/20"
+            >
+              {isDeleting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  Deleting...
+                </span>
+              ) : (
+                'Delete'
+              )}
+            </button>
+          )}
           <button
             onClick={handleReset}
             disabled={!hasChanges || isSaving}
@@ -285,12 +325,7 @@ export default function PersonaEditor({
                     onClick={() => handleRemoveExample(index)}
                     className="flex-shrink-0 rounded p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-error-500 dark:hover:bg-slate-700"
                   >
-                    <svg
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -349,6 +384,77 @@ export default function PersonaEditor({
           <span className="text-sm text-warning-700 dark:text-warning-300">
             You have unsaved changes
           </span>
+        </div>
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-error-100 dark:bg-error-900/30">
+                <svg
+                  className="h-5 w-5 text-error-600 dark:text-error-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  Delete Persona
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Are you sure you want to delete &ldquo;{persona.name}&rdquo;? This action cannot
+                  be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="btn btn-ghost btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="btn btn-sm bg-error-600 text-white hover:bg-error-700 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Deleting...
+                  </span>
+                ) : (
+                  'Delete'
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
