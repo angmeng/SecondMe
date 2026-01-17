@@ -1,6 +1,7 @@
 /**
  * LangGraph Workflow for Message Processing
- * User Story 2: Enhanced workflow with persona-based responses and knowledge graph context
+ * User Story 2 & 3: Enhanced workflow with persona-based responses, knowledge graph context,
+ * and Human Typing Simulation (HTS) for natural behavior
  */
 
 import { StateGraph, Annotation, END } from '@langchain/langgraph';
@@ -10,6 +11,13 @@ import { redisClient } from '../redis/client.js';
 import { routerNode } from './router-node.js';
 import { graphAndPersonaNode } from './graph-node.js';
 import { ContactContext, PersonaContext, ContactInfo } from '../falkordb/queries.js';
+import {
+  calculateTypingDelay as calculateHTSTypingDelay,
+  calculateCognitivePause,
+  formatTypingDelay,
+  isSleepHours,
+  queueDeferredMessage,
+} from '../hts/index.js';
 
 /**
  * Message classification type
@@ -31,6 +39,10 @@ export interface WorkflowState {
   // Pause control
   isPaused?: boolean;
   pauseReason?: string;
+
+  // Sleep hours control (HTS)
+  isSleeping?: boolean;
+  sleepWakesUpAt?: number;
 
   // Classification (from router)
   classification?: MessageClassification;
@@ -55,8 +67,11 @@ export interface WorkflowState {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
 
-  // HTS timing
+  // HTS timing (enhanced)
   typingDelay?: number;
+  thinkTime?: number;
+  cognitivePause?: number;
+  lastMessageTimestamp?: number;
 
   // Error handling
   error?: string;
@@ -110,6 +125,64 @@ async function checkPauseNode(state: WorkflowState): Promise<Partial<WorkflowSta
 }
 
 /**
+ * Check if we're in sleep hours (HTS feature)
+ * If sleeping, queue the message for later processing
+ */
+async function checkSleepHoursNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  console.log(`[Workflow] Checking sleep hours for ${state.contactId}...`);
+
+  try {
+    const sleepStatus = await isSleepHours();
+
+    if (sleepStatus.isSleeping) {
+      console.log(`[Workflow] Sleep hours active: ${sleepStatus.reason}`);
+      console.log(`[Workflow] Message will be queued until ${new Date(sleepStatus.wakesUpAt!).toISOString()}`);
+
+      // Queue the message for processing after wake up
+      await queueDeferredMessage(
+        state.contactId,
+        state.messageId,
+        state.content,
+        sleepStatus.wakesUpAt!
+      );
+
+      return {
+        isSleeping: true,
+        sleepWakesUpAt: sleepStatus.wakesUpAt,
+      };
+    }
+
+    console.log(`[Workflow] Not in sleep hours: ${sleepStatus.reason}`);
+    return {
+      isSleeping: false,
+    };
+  } catch (error: any) {
+    console.error('[Workflow] Error checking sleep hours:', error);
+    // On error, continue processing (fail open for sleep hours)
+    return {
+      isSleeping: false,
+    };
+  }
+}
+
+/**
+ * Get and store last message timestamp for cognitive pause calculation
+ */
+async function getLastMessageTimestamp(contactId: string): Promise<number | null> {
+  const key = `HTS:lastMessage:${contactId}`;
+  const timestamp = await redisClient.client.get(key);
+  return timestamp ? parseInt(timestamp, 10) : null;
+}
+
+/**
+ * Store last message timestamp for cognitive pause calculation
+ */
+async function setLastMessageTimestamp(contactId: string): Promise<void> {
+  const key = `HTS:lastMessage:${contactId}`;
+  await redisClient.client.setex(key, 3600, Date.now().toString()); // Expire after 1 hour
+}
+
+/**
  * Generate response for PHATIC messages using Haiku
  * Fast path - no context retrieval needed
  */
@@ -129,8 +202,8 @@ async function phaticResponseNode(state: WorkflowState): Promise<Partial<Workflo
     const latency = Date.now() - startTime;
     console.log(`[Workflow] Phatic response generated in ${latency}ms (${result.tokensUsed} tokens)`);
 
-    // Calculate typing delay
-    const typingDelay = calculateTypingDelay(result.response);
+    // Calculate enhanced typing delay with HTS
+    const htsDelay = await calculateEnhancedTypingDelay(result.response, state.contactId);
 
     // Log token usage
     await logTokenUsage({
@@ -150,7 +223,9 @@ async function phaticResponseNode(state: WorkflowState): Promise<Partial<Workflo
       tokensUsed: result.tokensUsed,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      typingDelay,
+      typingDelay: htsDelay.totalDelay,
+      thinkTime: htsDelay.thinkTime,
+      cognitivePause: htsDelay.cognitivePause,
     };
   } catch (error: any) {
     console.error('[Workflow] Error generating phatic response:', error);
@@ -198,8 +273,8 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       `[Workflow] Substantive response generated in ${latency}ms (${result.tokensUsed} tokens, cache read: ${result.cacheReadTokens}, cache write: ${result.cacheWriteTokens})`
     );
 
-    // Calculate typing delay
-    const typingDelay = calculateTypingDelay(result.response);
+    // Calculate enhanced typing delay with HTS
+    const htsDelay = await calculateEnhancedTypingDelay(result.response, state.contactId);
 
     // Log token usage
     await logTokenUsage({
@@ -219,7 +294,9 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       tokensUsed: result.tokensUsed,
       cacheReadTokens: result.cacheReadTokens,
       cacheWriteTokens: result.cacheWriteTokens,
-      typingDelay,
+      typingDelay: htsDelay.totalDelay,
+      thinkTime: htsDelay.thinkTime,
+      cognitivePause: htsDelay.cognitivePause,
     };
   } catch (error: any) {
     console.error('[Workflow] Error generating substantive response:', error);
@@ -230,22 +307,46 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
 }
 
 /**
- * Calculate typing delay for HTS (Human Typing Simulation)
- * Formula: 30ms base + (2ms per character) + random jitter
+ * Calculate typing delay using enhanced HTS module
+ * Returns the full delay result with breakdown for logging
  */
-function calculateTypingDelay(text: string): number {
-  const baseDelay = 30;
-  const charDelay = text.length * 2;
-  const jitter = Math.random() * 500;
+async function calculateEnhancedTypingDelay(
+  text: string,
+  contactId: string
+): Promise<{
+  totalDelay: number;
+  thinkTime: number;
+  cognitivePause: number;
+  breakdown: string;
+}> {
+  // Calculate base typing delay
+  const delayResult = calculateHTSTypingDelay(text);
 
-  const totalDelay = baseDelay + charDelay + jitter;
+  // Calculate cognitive pause based on last message time
+  const lastMessageTime = await getLastMessageTimestamp(contactId);
+  const cognitivePause = lastMessageTime
+    ? calculateCognitivePause(lastMessageTime)
+    : 0;
 
-  // Cap at 5 seconds
-  return Math.min(totalDelay, 5000);
+  // Update last message timestamp for next message
+  await setLastMessageTimestamp(contactId);
+
+  const totalDelay = delayResult.totalDelayMs + cognitivePause;
+  const breakdown = formatTypingDelay(delayResult) + (cognitivePause > 0 ? ` + ${cognitivePause}ms cognitive pause` : '');
+
+  console.log(`[Workflow] HTS delay calculated: ${breakdown}`);
+
+  return {
+    totalDelay,
+    thinkTime: delayResult.thinkTimeMs,
+    cognitivePause,
+    breakdown,
+  };
 }
 
 /**
  * Queue response to Gateway for sending
+ * T093: Includes enhanced HTS timing data
  */
 async function queueResponseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   if (!state.response) {
@@ -257,11 +358,14 @@ async function queueResponseNode(state: WorkflowState): Promise<Partial<Workflow
 
   try {
     // Add response to Redis stream for Gateway to consume
+    // Include HTS timing data for enhanced typing simulation
     const responsePayload = JSON.stringify({
       contactId: state.contactId,
       content: state.response,
       timestamp: Date.now(),
       typingDelay: state.typingDelay || 2000,
+      thinkTime: state.thinkTime || 0,
+      cognitivePause: state.cognitivePause || 0,
       classification: state.classification,
       tokensUsed: state.tokensUsed,
     });
@@ -311,6 +415,20 @@ async function logTokenUsage(log: TokenUsageLog): Promise<void> {
  */
 function shouldContinueAfterPause(state: WorkflowState): string {
   if (state.isPaused) {
+    return END;
+  }
+  if (state.error) {
+    return END;
+  }
+  return 'check_sleep_hours';
+}
+
+/**
+ * Routing logic - determines next node after sleep hours check
+ */
+function shouldContinueAfterSleepCheck(state: WorkflowState): string {
+  if (state.isSleeping) {
+    // Message has been queued for later, stop processing
     return END;
   }
   if (state.error) {
@@ -368,6 +486,9 @@ const WorkflowStateAnnotation = Annotation.Root({
   // Pause control
   isPaused: Annotation<boolean | undefined>,
   pauseReason: Annotation<string | undefined>,
+  // Sleep hours control (HTS)
+  isSleeping: Annotation<boolean | undefined>,
+  sleepWakesUpAt: Annotation<number | undefined>,
   // Classification
   classification: Annotation<MessageClassification | undefined>,
   classificationLatency: Annotation<number | undefined>,
@@ -385,16 +506,20 @@ const WorkflowStateAnnotation = Annotation.Root({
   tokensUsed: Annotation<number | undefined>,
   cacheReadTokens: Annotation<number | undefined>,
   cacheWriteTokens: Annotation<number | undefined>,
+  // HTS timing (enhanced)
   typingDelay: Annotation<number | undefined>,
+  thinkTime: Annotation<number | undefined>,
+  cognitivePause: Annotation<number | undefined>,
+  lastMessageTimestamp: Annotation<number | undefined>,
   // Error
   error: Annotation<string | undefined>,
 });
 
 /**
  * Build and compile the workflow graph
- * User Story 2 workflow:
+ * User Story 2 & 3 workflow with HTS:
  *
- * check_pause -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
+ * check_pause -> check_sleep_hours -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
  */
 export function buildWorkflow() {
   // Use type assertion to work around strict StateGraph typing
@@ -403,6 +528,7 @@ export function buildWorkflow() {
 
   // Add nodes
   workflow.addNode('check_pause', checkPauseNode);
+  workflow.addNode('check_sleep_hours', checkSleepHoursNode);
   workflow.addNode('router', routerNode);
   workflow.addNode('phatic_response', phaticResponseNode);
   workflow.addNode('graph_query', graphAndPersonaNode);
@@ -414,6 +540,11 @@ export function buildWorkflow() {
 
   // Add conditional edges
   workflow.addConditionalEdges('check_pause', shouldContinueAfterPause, {
+    check_sleep_hours: 'check_sleep_hours',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('check_sleep_hours', shouldContinueAfterSleepCheck, {
     router: 'router',
     [END]: END,
   });

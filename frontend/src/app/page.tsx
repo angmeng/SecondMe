@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 import { socketClient } from '@/lib/socket';
 import KillSwitch from '@/components/KillSwitch';
+import SessionExpiryCountdown from '@/components/SessionExpiryCountdown';
 import Link from 'next/link';
 import { EmptyStateNoActivity } from '@/components/ui/EmptyState';
 
@@ -33,6 +34,20 @@ export default function HomePage() {
   useEffect(() => {
     const socket = socketClient.getSocket();
     setIsSocketConnected(socket.connected);
+
+    // Keep isSocketConnected in sync with actual socket state
+    const handleSocketConnect = () => {
+      console.log('[Dashboard] Socket connected');
+      setIsSocketConnected(true);
+    };
+
+    const handleSocketDisconnect = () => {
+      console.log('[Dashboard] Socket disconnected');
+      setIsSocketConnected(false);
+    };
+
+    socket.on('connect', handleSocketConnect);
+    socket.on('disconnect', handleSocketDisconnect);
 
     const handleConnectionStatus = (data: { status: ConnectionStatus }) => {
       console.log('[Dashboard] Connection status:', data.status);
@@ -72,6 +87,8 @@ export default function HomePage() {
     socketClient.onPauseUpdate(handlePauseUpdate);
 
     return () => {
+      socket.off('connect', handleSocketConnect);
+      socket.off('disconnect', handleSocketDisconnect);
       socketClient.offConnectionStatus(handleConnectionStatus);
       socketClient.offMessageStatus(handleMessageStatus);
       socketClient.offPauseUpdate(handlePauseUpdate);
@@ -172,7 +189,7 @@ export default function HomePage() {
         </header>
 
         {/* Status Cards Grid */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* WhatsApp Connection Status */}
           <div className="card animate-fade-in-up">
             <div className="flex items-start justify-between">
@@ -305,6 +322,9 @@ export default function HomePage() {
               </Link>
             </div>
           </div>
+
+          {/* Session Expiry - T101 */}
+          <SessionExpiryCountdown className="animate-fade-in-up" />
         </div>
 
         {/* Master Kill Switch */}

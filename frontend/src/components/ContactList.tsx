@@ -1,11 +1,11 @@
 /**
  * Contact List Component
- * Displays contacts with bot enable/disable toggles and enhanced UI
+ * T109: Displays contacts with search, filter, and bot enable/disable toggles
  */
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { socketClient } from '@/lib/socket';
 import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
@@ -19,6 +19,8 @@ export interface Contact {
   expiresAt?: number;
 }
 
+type FilterType = 'all' | 'active' | 'paused';
+
 interface ContactListProps {
   contacts: Contact[];
   setContacts: React.Dispatch<React.SetStateAction<Contact[]>>;
@@ -28,6 +30,34 @@ interface ContactListProps {
 export default function ContactList({ contacts, setContacts, isLoading }: ContactListProps) {
   const [error, setError] = useState<string | null>(null);
   const [loadingContactId, setLoadingContactId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<FilterType>('all');
+
+  // Filter and search contacts
+  const filteredContacts = useMemo(() => {
+    return contacts.filter((contact) => {
+      // Apply search filter
+      const matchesSearch =
+        searchQuery === '' ||
+        contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        contact.id.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // Apply status filter
+      const matchesFilter =
+        filterType === 'all' ||
+        (filterType === 'active' && !contact.isPaused) ||
+        (filterType === 'paused' && contact.isPaused);
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [contacts, searchQuery, filterType]);
+
+  // Statistics for filter badges
+  const stats = useMemo(() => ({
+    total: contacts.length,
+    active: contacts.filter((c) => !c.isPaused).length,
+    paused: contacts.filter((c) => c.isPaused).length,
+  }), [contacts]);
 
   useEffect(() => {
     // Subscribe to pause updates for real-time state sync
@@ -140,13 +170,87 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
     );
   }
 
-  // Empty state
+  // Empty state (no contacts at all)
   if (contacts.length === 0) {
     return <EmptyStateNoContacts />;
   }
 
   return (
     <div className="space-y-4">
+      {/* Search and Filter Controls */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Search Input */}
+        <div className="relative flex-1 max-w-md">
+          <svg
+            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search contacts..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-4 text-sm placeholder:text-slate-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:placeholder:text-slate-500"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+          <button
+            onClick={() => setFilterType('all')}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              filterType === 'all'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+            }`}
+          >
+            All
+            <span className="ml-1.5 text-xs text-slate-400">({stats.total})</span>
+          </button>
+          <button
+            onClick={() => setFilterType('active')}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              filterType === 'active'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+            }`}
+          >
+            Active
+            <span className="ml-1.5 text-xs text-success-500">({stats.active})</span>
+          </button>
+          <button
+            onClick={() => setFilterType('paused')}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              filterType === 'paused'
+                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+            }`}
+          >
+            Paused
+            <span className="ml-1.5 text-xs text-error-500">({stats.paused})</span>
+          </button>
+        </div>
+      </div>
+
       {/* Error notification */}
       {error && (
         <div className="animate-fade-in rounded-lg border border-error-200 bg-error-50 p-4 dark:border-error-900/50 dark:bg-error-900/20">
@@ -169,9 +273,44 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
         </div>
       )}
 
+      {/* No results state */}
+      {filteredContacts.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <svg
+            className="mb-3 h-12 w-12 text-slate-300 dark:text-slate-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-400">No contacts found</p>
+          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            {searchQuery
+              ? `No contacts matching "${searchQuery}"`
+              : `No ${filterType} contacts`}
+          </p>
+          <button
+            onClick={() => {
+              setSearchQuery('');
+              setFilterType('all');
+            }}
+            className="mt-3 text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
+
       {/* Contact grid */}
+      {filteredContacts.length > 0 && (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {contacts.map((contact, index) => (
+        {filteredContacts.map((contact, index) => (
           <div
             key={contact.id}
             className="card card-interactive group animate-fade-in-up"
@@ -299,8 +438,8 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
               </button>
             </div>
 
-            {/* Hover action hint */}
-            <div className="mt-3 border-t border-slate-100 pt-3 opacity-0 transition-opacity group-hover:opacity-100 dark:border-slate-700">
+            {/* Action hint - always visible on mobile, hover-only on larger screens */}
+            <div className="mt-3 border-t border-slate-100 pt-3 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 dark:border-slate-700">
               <p className="text-xs text-slate-400">
                 {contact.isPaused
                   ? 'Click to resume automated responses'
@@ -310,6 +449,14 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
           </div>
         ))}
       </div>
+      )}
+
+      {/* Results count */}
+      {filteredContacts.length > 0 && filteredContacts.length !== contacts.length && (
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500">
+          Showing {filteredContacts.length} of {contacts.length} contacts
+        </p>
+      )}
     </div>
   );
 }

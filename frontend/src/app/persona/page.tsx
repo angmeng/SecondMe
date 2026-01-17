@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import PersonaEditor from '@/components/PersonaEditor';
+import SleepHoursConfig from '@/components/SleepHoursConfig';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import Link from 'next/link';
 
@@ -285,6 +286,11 @@ export default function PersonaPage() {
           </div>
         )}
 
+        {/* Sleep Hours Configuration - T099 */}
+        <div className="mt-8 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+          <SleepHoursConfig />
+        </div>
+
         {/* Help Section */}
         <div className="mt-8 card animate-fade-in-up" style={{ animationDelay: '200ms' }}>
           <div className="flex items-start gap-4">
@@ -292,6 +298,7 @@ export default function PersonaPage() {
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
+                  strokeLinejoin="round"
                   strokeLinejoin="round"
                   strokeWidth={1.5}
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"

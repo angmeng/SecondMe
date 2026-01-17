@@ -19,6 +19,8 @@ import { redisClient } from './redis/client.js';
 import { AuthHandler } from './whatsapp/auth.js';
 import { MessageHandler } from './whatsapp/message-handler.js';
 import { MessageSender } from './whatsapp/sender.js';
+import { SessionManager } from './whatsapp/session-manager.js';
+import { ContactManager } from './whatsapp/contact-manager.js';
 import { SocketEventEmitter } from './socket/events.js';
 import express from 'express';
 
@@ -44,6 +46,8 @@ export const io = new Server(httpServer, {
 let authHandler: AuthHandler;
 let messageHandler: MessageHandler;
 let messageSender: MessageSender;
+let sessionManager: SessionManager;
+let contactManager: ContactManager;
 let socketEmitter: SocketEventEmitter;
 
 // Health check endpoint
@@ -55,6 +59,68 @@ app.get('/health', (req, res) => {
     redis: redisClient.status === 'ready' ? 'connected' : 'disconnected',
     timestamp: new Date().toISOString(),
   });
+});
+
+// Session status endpoint
+app.get('/api/session', (req, res) => {
+  try {
+    if (!sessionManager) {
+      return res.status(503).json({
+        error: 'Session manager not initialized',
+      });
+    }
+
+    const status = sessionManager.getStatus();
+    res.json(status);
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to get session status',
+    });
+  }
+});
+
+// Session refresh endpoint
+app.post('/api/session/refresh', async (req, res) => {
+  try {
+    if (!sessionManager) {
+      return res.status(503).json({
+        error: 'Session manager not initialized',
+      });
+    }
+
+    await sessionManager.refreshSession();
+    res.json({
+      success: true,
+      message: 'Session refresh initiated. Please scan the new QR code.',
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to refresh session',
+    });
+  }
+});
+
+// Contacts refresh endpoint - manually trigger re-fetch from WhatsApp
+app.post('/api/contacts/refresh', async (req, res) => {
+  try {
+    if (!contactManager) {
+      return res.status(503).json({
+        error: 'WhatsApp not ready. Contact manager not initialized.',
+      });
+    }
+
+    const contacts = await contactManager.fetchAndCacheContacts();
+    res.json({
+      success: true,
+      count: contacts.length,
+      message: `Successfully refreshed ${contacts.length} contacts`,
+    });
+  } catch (error: any) {
+    console.error('[Gateway] Error refreshing contacts:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to refresh contacts',
+    });
+  }
 });
 
 // Socket.io connection handler
@@ -91,12 +157,14 @@ async function startResponseConsumer() {
 
         for (const response of responses) {
           try {
-            const { contactId, content, typingDelay } = response.payload;
+            const { contactId, content, typingDelay, thinkTime } = response.payload;
 
-            // Send message with typing indicator
+            // Send message with enhanced HTS typing indicator
             const result = await messageSender.sendMessage(contactId, content, {
               typingDelay,
+              thinkTime,
               simulateTyping: true,
+              usePhaseTyping: thinkTime > 0,
             });
 
             if (result.success) {
@@ -144,7 +212,35 @@ async function startGatewayService() {
     authHandler = new AuthHandler(client);
     messageHandler = new MessageHandler(client);
     messageSender = new MessageSender(client);
+    sessionManager = new SessionManager(client);
     socketEmitter = new SocketEventEmitter(io);
+
+    // Initialize session tracking when WhatsApp is ready
+    client.on('ready', async () => {
+      console.log('[Gateway] WhatsApp ready, initializing session manager...');
+      await sessionManager.initialize();
+
+      // Ensure session state reflects that WhatsApp is ready
+      // This handles reconnection cases where 'authenticated' event doesn't fire
+      const currentSession = sessionManager.getSessionInfo();
+      if (currentSession?.state !== 'CONNECTED') {
+        console.log('[Gateway] Session state not CONNECTED, updating...');
+        await sessionManager.handleReauthentication();
+      }
+
+      // Initialize contact manager and fetch contacts
+      contactManager = new ContactManager(client);
+      await contactManager.fetchAndCacheContacts();
+      console.log('[Gateway] Contacts cached');
+    });
+
+    // Handle re-authentication
+    client.on('authenticated', async () => {
+      console.log('[Gateway] WhatsApp authenticated');
+      if (sessionManager) {
+        await sessionManager.handleReauthentication();
+      }
+    });
 
     console.log('[Gateway] All handlers initialized');
 
@@ -169,6 +265,11 @@ async function shutdown() {
   console.log('[Gateway] Shutting down gracefully...');
 
   try {
+    // Stop session manager first
+    if (sessionManager) {
+      sessionManager.stop();
+    }
+
     await whatsappClient.destroy();
     await redisClient.quit();
     httpServer.close(() => {

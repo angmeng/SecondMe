@@ -3,6 +3,8 @@
  * Engaging empty state display with illustration and action
  */
 
+'use client';
+
 import Link from 'next/link';
 
 interface EmptyStateProps {
