@@ -282,25 +282,25 @@ This is a web application with microservices architecture:
 
 **Purpose**: Improvements, security hardening, and production readiness that affect multiple user stories
 
-- [ ] T116 [P] Add comprehensive error handling and logging to all services using winston
-- [ ] T117 [P] Implement encryption at rest for FalkorDB data using LUKS on Docker volume
-- [ ] T118 [P] Implement AES-256 encryption for WhatsApp session tokens in Redis
-- [ ] T119 [P] Add input validation and sanitization across all API endpoints
-- [ ] T120 [P] Implement CORS configuration for frontend-backend communication
-- [ ] T121 [P] Add rate limiting to all HTTP endpoints to prevent abuse
-- [ ] T122 [P] Create comprehensive error pages for frontend (404, 500, offline)
-- [ ] T123 [P] Add loading states and skeletons to all dashboard components
-- [ ] T124 [P] Implement graceful shutdown handlers for all services
-- [ ] T125 Add Docker health checks to docker-compose.yml for all services
-- [ ] T126 [P] Create production environment configuration in .env.production
-- [ ] T127 [P] Add dependency license scanning script to package.json (verify no AGPL)
-- [ ] T128 [P] Create deployment guide at docs/deployment.md for VPS setup
-- [ ] T129 [P] Create security hardening guide at docs/security.md
-- [ ] T130 [P] Implement backup script for FalkorDB graph data
+- [X] T116 [P] Add comprehensive error handling and logging to all services using winston
+- [X] T117 [P] Implement encryption at rest for FalkorDB data using LUKS on Docker volume
+- [X] T118 [P] Implement AES-256 encryption for WhatsApp session tokens in Redis
+- [X] T119 [P] Add input validation and sanitization across all API endpoints
+- [X] T120 [P] Implement CORS configuration for frontend-backend communication
+- [X] T121 [P] Add rate limiting to all HTTP endpoints to prevent abuse
+- [X] T122 [P] Create comprehensive error pages for frontend (404, 500, offline)
+- [X] T123 [P] Add loading states and skeletons to all dashboard components
+- [X] T124 [P] Implement graceful shutdown handlers for all services
+- [X] T125 Add Docker health checks to docker-compose.yml for all services
+- [X] T126 [P] Create production environment configuration in .env.production
+- [X] T127 [P] Add dependency license scanning script to package.json (verify no AGPL)
+- [X] T128 [P] Create deployment guide at docs/deployment.md for VPS setup
+- [X] T129 [P] Create security hardening guide at docs/security.md
+- [X] T130 [P] Implement backup script for FalkorDB graph data
 - [ ] T131 Run full quickstart.md validation end-to-end on fresh environment
-- [ ] T132 [P] Create troubleshooting guide at docs/troubleshooting.md
-- [ ] T133 [P] Add performance monitoring and alerting configuration
-- [ ] T134 Verify all constitutional requirements met per plan.md gates
+- [X] T132 [P] Create troubleshooting guide at docs/troubleshooting.md
+- [X] T133 [P] Add performance monitoring and alerting configuration
+- [X] T134 Verify all constitutional requirements met per plan.md gates
 
 ---
 
