@@ -19,7 +19,11 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "licenses:check": "license-checker --summary --failOn 'AGPL;GPL;LGPL' --excludePrivatePackages",
+    "licenses:report": "license-checker --json --out licenses.json --excludePrivatePackages",
+    "backup:db": "./scripts/backup-falkordb.sh",
+    "precommit": "npm run lint && npm run type-check && npm run licenses:check"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -30,6 +34,7 @@
     "eslint": "^9.18.0",
     "eslint-config-next": "^16.1.1",
     "eslint-config-prettier": "^10.0.1",
+    "license-checker": "^25.0.1",
     "playwright": "^1.57.0",
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",

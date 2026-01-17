@@ -6,6 +6,7 @@ This file provides guidance for Claude Code when working with the SecondMe proje
 
 - [Backend Services Guidelines](services/CLAUDE.md)
 - [Frontend Dashboard Guidelines](frontend/CLAUDE.md)
+- [Infrastructure Guidelines](infra/CLAUDE.md)
 - [Project Specifications](specs/001-personal-ai-clone/)
 
 ## Project Overview
@@ -105,6 +106,61 @@ Required in `.env`:
 - `ANTHROPIC_API_KEY` - Claude API access
 - `FALKORDB_PASSWORD` - Graph database auth
 - `NODE_ENV` - development/production
+
+## Environment Setup
+
+### Local Development (services run on host)
+
+Start infrastructure in Docker, run services locally:
+
+```bash
+# Start only Redis and FalkorDB
+docker compose up -d redis falkordb
+
+# Configure .env for local development
+REDIS_HOST=localhost
+REDIS_PORT=6380          # Docker exposes Redis on 6380
+FALKORDB_HOST=localhost
+FALKORDB_PORT=6379
+
+# Run services locally
+npm run dev
+```
+
+### Docker Development (all services in containers)
+
+Run everything in Docker:
+
+```bash
+# Configure .env for Docker networking
+REDIS_HOST=redis
+REDIS_PORT=6379          # Container internal port
+FALKORDB_HOST=falkordb
+FALKORDB_PORT=6379
+
+# Start all services
+docker compose up -d
+```
+
+### Port Mapping Reference
+
+| Service | Container Port | Host Port |
+|---------|---------------|-----------|
+| Redis | 6379 | **6380** |
+| FalkorDB | 6379 | 6379 |
+| Gateway | 3001 | 3001 |
+| Orchestrator | 3002 | 3002 |
+| Graph Worker | 3003 | 3003 |
+| Frontend | 3000 | 3000 |
+
+### Common Setup Issues
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `ENOTFOUND redis` | Using Docker hostname locally | Set `REDIS_HOST=localhost` |
+| `ECONNREFUSED :6379` | Wrong Redis port locally | Set `REDIS_PORT=6380` |
+| `NOAUTH Authentication required` | Missing FalkorDB password | Set `FALKORDB_PASSWORD` in `.env` |
+| `EADDRINUSE` | Port conflict | Stop conflicting process or change port |
 
 ### Version Gotchas
 
