@@ -93,7 +93,7 @@ async function processChatHistoryQueue() {
  * TODO: Implement entity extraction and graph mutations in Phase 3
  */
 async function processChatHistoryItem(message: { id: string; fields: Record<string, string> }) {
-  const { contactId, content, timestamp } = message.fields;
+  const { contactId, content: _content, timestamp } = message.fields;
 
   console.log(
     `[${SERVICE_NAME}] Chat history item: contactId=${contactId}, timestamp=${timestamp}`

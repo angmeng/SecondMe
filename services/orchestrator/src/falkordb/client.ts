@@ -3,11 +3,11 @@
  * Handles graph database queries for knowledge retrieval and context
  */
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
-const FALKORDB_HOST = process.env.FALKORDB_HOST || 'localhost';
-const FALKORDB_PORT = parseInt(process.env.FALKORDB_PORT || '6379', 10);
-const FALKORDB_PASSWORD = process.env.FALKORDB_PASSWORD || undefined;
+const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
+const FALKORDB_PORT = parseInt(process.env['FALKORDB_PORT'] || '6379', 10);
+const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'];
 const GRAPH_NAME = 'knowledge_graph';
 
 class FalkorDBClient {
@@ -17,8 +17,8 @@ class FalkorDBClient {
     this.client = new Redis({
       host: FALKORDB_HOST,
       port: FALKORDB_PORT,
-      password: FALKORDB_PASSWORD,
-      retryStrategy: (times) => {
+      ...(FALKORDB_PASSWORD && { password: FALKORDB_PASSWORD }),
+      retryStrategy: (times: number) => {
         const delay = Math.min(times * 50, 2000);
         console.log(`[Orchestrator FalkorDB] Retrying connection... (${times})`);
         return delay;
@@ -30,7 +30,7 @@ class FalkorDBClient {
       console.log('[Orchestrator FalkorDB] Connected to FalkorDB');
     });
 
-    this.client.on('error', (err) => {
+    this.client.on('error', (err: Error) => {
       console.error('[Orchestrator FalkorDB] FalkorDB client error:', err);
     });
 
@@ -79,7 +79,7 @@ class FalkorDBClient {
     }
 
     // Result format: [header, data[], statistics]
-    const [header, data, statistics] = result;
+    const [header, data, _statistics] = result;
 
     if (!data || data.length === 0) {
       return [];

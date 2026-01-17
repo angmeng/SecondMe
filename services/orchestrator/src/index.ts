@@ -14,10 +14,10 @@ config({ path: resolve(__dirname, '../../../.env') });
 
 import { redisClient } from './redis/client.js';
 import { falkordbClient } from './falkordb/client.js';
-import { buildWorkflow, WorkflowState } from './langgraph/workflow.js';
+import { buildWorkflow } from './langgraph/workflow.js';
 
-const PORT = process.env.ORCHESTRATOR_PORT || 3002;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = process.env['ORCHESTRATOR_PORT'] || 3002;
+const NODE_ENV = process.env['NODE_ENV'] || 'development';
 
 // Initialize workflow
 const workflow = buildWorkflow();
@@ -40,14 +40,19 @@ async function startMessageConsumer() {
         for (const message of messages) {
           try {
             // Parse message payload
-            const payload = JSON.parse(message.fields.payload);
+            const payloadStr = message.fields['payload'];
+            if (!payloadStr) {
+              console.warn(`[Orchestrator] Skipping message ${message.id}: missing payload`);
+              continue;
+            }
+            const payload = JSON.parse(payloadStr);
 
             console.log(
               `[Orchestrator] Processing message from ${payload.contactId}: ${payload.content}`
             );
 
             // Build initial workflow state
-            const initialState: WorkflowState = {
+            const initialState = {
               messageId: payload.messageId,
               contactId: payload.contactId,
               contactName: payload.contactName,
@@ -60,7 +65,7 @@ async function startMessageConsumer() {
 
             console.log(
               `[Orchestrator] Workflow completed for ${payload.contactId}:`,
-              result.isPaused ? `Paused (${result.pauseReason})` : 'Response generated'
+              result['isPaused'] ? `Paused (${result['pauseReason']})` : 'Response generated'
             );
 
             // Delete message from queue after processing
@@ -100,7 +105,7 @@ async function startOrchestratorService() {
     console.log('[Orchestrator] FalkorDB connected');
 
     // Verify Anthropic API key
-    if (!process.env.ANTHROPIC_API_KEY) {
+    if (!process.env['ANTHROPIC_API_KEY']) {
       throw new Error('ANTHROPIC_API_KEY environment variable not set');
     }
     console.log('[Orchestrator] Anthropic API key verified');

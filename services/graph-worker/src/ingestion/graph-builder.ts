@@ -3,7 +3,7 @@
  * User Story 2: Transforms entity extraction results into FalkorDB operations
  */
 
-import { ExtractedEntity, EntityType, ExtractedRelationship } from './entity-extractor.js';
+import { ExtractedEntity, ExtractedRelationship } from './entity-extractor.js';
 import { falkordbClient } from '../falkordb/client.js';
 
 /**

@@ -3,11 +3,11 @@
  * Handles chat history queue consumption
  */
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const REDIS_HOST = process.env['REDIS_HOST'] || 'localhost';
+const REDIS_PORT = parseInt(process.env['REDIS_PORT'] || '6380', 10);
+const REDIS_PASSWORD = process.env['REDIS_PASSWORD'];
 const CHAT_HISTORY_QUEUE = 'QUEUE:chat_history';
 
 class RedisClient {
@@ -17,8 +17,8 @@ class RedisClient {
     this.client = new Redis({
       host: REDIS_HOST,
       port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-      retryStrategy: (times) => {
+      ...(REDIS_PASSWORD && { password: REDIS_PASSWORD }),
+      retryStrategy: (times: number) => {
         const delay = Math.min(times * 50, 2000);
         console.log(`[Graph Worker Redis] Retrying connection... (${times})`);
         return delay;
@@ -31,7 +31,7 @@ class RedisClient {
       console.log('[Graph Worker Redis] Connected to Redis');
     });
 
-    this.client.on('error', (err) => {
+    this.client.on('error', (err: Error) => {
       console.error('[Graph Worker Redis] Redis client error:', err);
     });
 
@@ -75,12 +75,16 @@ class RedisClient {
 
     const messages: Array<{ id: string; fields: Record<string, string> }> = [];
 
-    for (const [streamName, entries] of results) {
+    for (const [_streamName, entries] of results) {
       for (const [id, fieldArray] of entries) {
         // Convert field array [k1, v1, k2, v2] to object {k1: v1, k2: v2}
         const fields: Record<string, string> = {};
         for (let i = 0; i < fieldArray.length; i += 2) {
-          fields[fieldArray[i]] = fieldArray[i + 1];
+          const key = fieldArray[i];
+          const value = fieldArray[i + 1];
+          if (key !== undefined && value !== undefined) {
+            fields[key] = value;
+          }
         }
         messages.push({ id, fields });
       }

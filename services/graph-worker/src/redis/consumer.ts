@@ -5,12 +5,11 @@
 
 import { redisClient } from './client.js';
 import { parseWhatsAppExport, filterTextMessages, groupIntoConversationChunks, ParsedMessage } from '../ingestion/chat-parser.js';
-import { extractEntities, deduplicateEntities, ExtractedEntity } from '../ingestion/entity-extractor.js';
+import { extractEntities, deduplicateEntities } from '../ingestion/entity-extractor.js';
 import { buildGraphFromEntities } from '../ingestion/graph-builder.js';
 import { recordProcessedMessage, updateContactLastInteraction } from '../falkordb/mutations.js';
 
 const SERVICE_NAME = 'Graph Worker Consumer';
-const CHAT_HISTORY_QUEUE = 'QUEUE:chat_history';
 const REAL_TIME_QUEUE = 'QUEUE:messages_for_extraction';
 
 /**
@@ -163,6 +162,12 @@ class RedisConsumer {
   private async processChatHistoryMessage(message: QueueMessage): Promise<void> {
     const { contactId, contactName, content, type } = message.fields;
 
+    // Type guards for required fields
+    if (!contactId || !content) {
+      console.warn(`[${SERVICE_NAME}] Skipping message ${message.id}: missing contactId or content`);
+      return;
+    }
+
     if (type === 'export') {
       // Full chat export - parse and process
       await this.processWhatsAppExport(contactId, contactName || 'Unknown', content);
@@ -181,6 +186,13 @@ class RedisConsumer {
    */
   private async processRealTimeMessage(message: QueueMessage): Promise<void> {
     const { contactId, contactName, content, sender } = message.fields;
+
+    // Type guards for required fields
+    if (!contactId || !content) {
+      console.warn(`[${SERVICE_NAME}] Skipping real-time message ${message.id}: missing contactId or content`);
+      return;
+    }
+
     const timestamp = parseInt(message.fields['timestamp'] || Date.now().toString(), 10);
 
     await this.addToBatch(contactId, contactName || 'Unknown', {
@@ -222,13 +234,6 @@ class RedisConsumer {
       if (!chunk || chunk.length < this.config.minMessagesForExtraction) continue;
 
       console.log(`[${SERVICE_NAME}] Processing chunk ${i + 1}/${chunks.length} (${chunk.length} messages)...`);
-
-      // Format messages for extraction
-      const formattedMessages = chunk.map((m) => ({
-        sender: m.sender,
-        content: m.content,
-        timestamp: m.timestamp.getTime(),
-      }));
 
       // Extract entities
       const result = await extractEntities(

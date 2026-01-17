@@ -3,24 +3,28 @@
  * Handles message queue consumption, state management, and caching
  */
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const REDIS_HOST = process.env['REDIS_HOST'] || 'localhost';
+const REDIS_PORT = parseInt(process.env['REDIS_PORT'] || '6380', 10);
+const REDIS_PASSWORD = process.env['REDIS_PASSWORD'];
 
-class RedisClient {
+class OrchestratorRedisClient {
   public client: Redis;
   public subscriber: Redis;
   public publisher: Redis;
 
   constructor() {
-    // Main client for general operations
-    this.client = new Redis({
+    const baseOptions = {
       host: REDIS_HOST,
       port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-      retryStrategy: (times) => {
+      ...(REDIS_PASSWORD && { password: REDIS_PASSWORD }),
+    };
+
+    // Main client for general operations
+    this.client = new Redis({
+      ...baseOptions,
+      retryStrategy: (times: number) => {
         const delay = Math.min(times * 50, 2000);
         console.log(`[Orchestrator Redis] Retrying connection... (${times})`);
         return delay;
@@ -29,25 +33,17 @@ class RedisClient {
     });
 
     // Dedicated subscriber client for pub/sub
-    this.subscriber = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-    });
+    this.subscriber = new Redis(baseOptions);
 
     // Dedicated publisher client for pub/sub
-    this.publisher = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-    });
+    this.publisher = new Redis(baseOptions);
 
     // Event handlers
     this.client.on('connect', () => {
       console.log('[Orchestrator Redis] Connected to Redis');
     });
 
-    this.client.on('error', (err) => {
+    this.client.on('error', (err: Error) => {
       console.error('[Orchestrator Redis] Redis client error:', err);
     });
 
@@ -85,15 +81,10 @@ class RedisClient {
    * Subscribe to Redis pub/sub channel
    */
   async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
-    this.subscriber.subscribe(channel, (err, count) => {
-      if (err) {
-        console.error(`[Orchestrator Redis] Failed to subscribe to ${channel}:`, err);
-      } else {
-        console.log(`[Orchestrator Redis] Subscribed to ${channel} (${count} total)`);
-      }
-    });
+    await this.subscriber.subscribe(channel);
+    console.log(`[Orchestrator Redis] Subscribed to ${channel}`);
 
-    this.subscriber.on('message', (chan, msg) => {
+    this.subscriber.on('message', (chan: string, msg: string) => {
       if (chan === channel) {
         callback(msg);
       }
@@ -195,12 +186,16 @@ class RedisClient {
 
     const messages: Array<{ id: string; fields: Record<string, string> }> = [];
 
-    for (const [streamName, entries] of results) {
+    for (const [_streamName, entries] of results) {
       for (const [id, fieldArray] of entries) {
         // Convert field array [k1, v1, k2, v2] to object {k1: v1, k2: v2}
         const fields: Record<string, string> = {};
         for (let i = 0; i < fieldArray.length; i += 2) {
-          fields[fieldArray[i]] = fieldArray[i + 1];
+          const key = fieldArray[i];
+          const value = fieldArray[i + 1];
+          if (key !== undefined && value !== undefined) {
+            fields[key] = value;
+          }
         }
         messages.push({ id, fields });
       }
@@ -218,4 +213,4 @@ class RedisClient {
 }
 
 // Export singleton instance
-export const redisClient = new RedisClient();
+export const redisClient = new OrchestratorRedisClient();

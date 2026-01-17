@@ -158,35 +158,35 @@ This is a web application with microservices architecture:
 
 ### US2 - Orchestrator Service (Persona & Context Retrieval)
 
-- [ ] T065 [P] [US2] Implement Haiku router node at services/orchestrator/src/langgraph/router-node.ts to classify phatic vs substantive messages
-- [ ] T066 [P] [US2] Implement graph context retrieval at services/orchestrator/src/falkordb/queries.ts with 2-hop Cypher queries
-- [ ] T067 [US2] Implement graph query node at services/orchestrator/src/langgraph/graph-node.ts calling FalkorDB for contact context
-- [ ] T068 [US2] Implement persona cache loader at services/orchestrator/src/redis/persona-cache.ts using CACHE:persona:{personaId}
-- [ ] T069 [US2] Update reasoner node to inject persona style guide and graph context into Sonnet prompt with cache_control
-- [ ] T070 [US2] Implement conditional routing in workflow: phatic → skip graph query, substantive → retrieve context
-- [ ] T071 [P] [US2] Implement prompt template builder at services/orchestrator/src/anthropic/prompt-templates.ts with cached persona sections
-- [ ] T072 [US2] Implement token usage logging in reasoner node for cost tracking
+- [X] T065 [P] [US2] Implement Haiku router node at services/orchestrator/src/langgraph/router-node.ts to classify phatic vs substantive messages
+- [X] T066 [P] [US2] Implement graph context retrieval at services/orchestrator/src/falkordb/queries.ts with 2-hop Cypher queries
+- [X] T067 [US2] Implement graph query node at services/orchestrator/src/langgraph/graph-node.ts calling FalkorDB for contact context
+- [X] T068 [US2] Implement persona cache loader at services/orchestrator/src/redis/persona-cache.ts using CACHE:persona:{personaId}
+- [X] T069 [US2] Update reasoner node to inject persona style guide and graph context into Sonnet prompt with cache_control
+- [X] T070 [US2] Implement conditional routing in workflow: phatic → skip graph query, substantive → retrieve context
+- [X] T071 [P] [US2] Implement prompt template builder at services/orchestrator/src/anthropic/prompt-templates.ts with cached persona sections
+- [X] T072 [US2] Implement token usage logging in reasoner node for cost tracking
 
 ### US2 - Graph Worker Service (Knowledge Extraction)
 
-- [ ] T073 [P] [US2] Implement chat parser at services/graph-worker/src/ingestion/chat-parser.ts to parse WhatsApp export format
-- [ ] T074 [P] [US2] Implement entity extractor at services/graph-worker/src/ingestion/entity-extractor.ts using Claude Sonnet structured output
-- [ ] T075 [US2] Implement graph builder at services/graph-worker/src/ingestion/graph-builder.ts to create Person, Company, Event, Topic nodes
-- [ ] T076 [US2] Implement FalkorDB mutations at services/graph-worker/src/falkordb/mutations.ts for MERGE entities and relationships
-- [ ] T077 [US2] Implement Redis consumer for chat history queue at services/graph-worker/src/redis/consumer.ts
-- [ ] T078 [US2] Implement real-time fact extraction from new messages (consume events:messages and extract entities)
-- [ ] T079 [US2] Implement background ingestion job that processes uploaded chat exports asynchronously
+- [X] T073 [P] [US2] Implement chat parser at services/graph-worker/src/ingestion/chat-parser.ts to parse WhatsApp export format
+- [X] T074 [P] [US2] Implement entity extractor at services/graph-worker/src/ingestion/entity-extractor.ts using Claude Sonnet structured output
+- [X] T075 [US2] Implement graph builder at services/graph-worker/src/ingestion/graph-builder.ts to create Person, Company, Event, Topic nodes
+- [X] T076 [US2] Implement FalkorDB mutations at services/graph-worker/src/falkordb/mutations.ts for MERGE entities and relationships
+- [X] T077 [US2] Implement Redis consumer for chat history queue at services/graph-worker/src/redis/consumer.ts
+- [X] T078 [US2] Implement real-time fact extraction from new messages (consume events:messages and extract entities)
+- [X] T079 [US2] Implement background ingestion job that processes uploaded chat exports asynchronously
 
 ### US2 - Frontend Dashboard (Persona Management)
 
-- [ ] T080 [P] [US2] Create persona editor page at frontend/src/app/persona/page.tsx
-- [ ] T081 [P] [US2] Create persona editor component at frontend/src/components/PersonaEditor.tsx with style guide textarea
-- [ ] T082 [US2] Create Server Action at frontend/src/app/api/persona/route.ts to update Persona nodes in FalkorDB
-- [ ] T083 [US2] Implement persona loading from FalkorDB in editor page using async React 19 pattern
-- [ ] T084 [US2] Create conversation view page at frontend/src/app/contacts/[id]/page.tsx with message thread
-- [ ] T085 [P] [US2] Create conversation thread component at frontend/src/components/ConversationThread.tsx
-- [ ] T086 [US2] Implement Socket.io subscription for real-time message updates in conversation view
-- [ ] T087 [US2] Add visual indicators to distinguish bot-sent vs user-sent messages in thread component
+- [X] T080 [P] [US2] Create persona editor page at frontend/src/app/persona/page.tsx
+- [X] T081 [P] [US2] Create persona editor component at frontend/src/components/PersonaEditor.tsx with style guide textarea
+- [X] T082 [US2] Create Server Action at frontend/src/app/api/persona/route.ts to update Persona nodes in FalkorDB
+- [X] T083 [US2] Implement persona loading from FalkorDB in editor page using async React 19 pattern
+- [X] T084 [US2] Create conversation view page at frontend/src/app/contacts/[id]/page.tsx with message thread
+- [X] T085 [P] [US2] Create conversation thread component at frontend/src/components/ConversationThread.tsx
+- [X] T086 [US2] Implement Socket.io subscription for real-time message updates in conversation view
+- [X] T087 [US2] Add visual indicators to distinguish bot-sent vs user-sent messages in thread component
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 - Bot applies persona styles to responses
