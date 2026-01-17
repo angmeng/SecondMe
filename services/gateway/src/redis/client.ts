@@ -238,10 +238,10 @@ class RedisClient {
   }
 
   /**
-   * Cache contacts list with 5-minute TTL
+   * Cache contacts list (persists until explicitly refreshed)
    */
   async cacheContacts(contacts: any[]): Promise<void> {
-    await this.client.setex('CONTACTS:list', 300, JSON.stringify(contacts));
+    await this.client.set('CONTACTS:list', JSON.stringify(contacts));
     await this.client.set('CONTACTS:lastUpdated', Date.now().toString());
     console.log(`[Gateway Redis] Cached ${contacts.length} contacts`);
   }
