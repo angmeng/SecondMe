@@ -6,6 +6,11 @@
 
 import { haikuClient } from '../anthropic/haiku-client.js';
 import { WorkflowState, MessageClassification } from './workflow.js';
+import {
+  extractRelationshipSignals,
+  queueRelationshipSignal,
+  isHighConfidenceSignal,
+} from './relationship-signals.js';
 
 /**
  * Router node - classifies incoming message using Haiku
@@ -16,6 +21,18 @@ export async function routerNode(state: WorkflowState): Promise<Partial<Workflow
 
   const startTime = Date.now();
 
+  // Extract relationship signals from incoming message (fire-and-forget)
+  // This adds <5ms latency since it's just regex matching
+  const relationshipSignal = extractRelationshipSignals(state.content, false); // false = incoming message
+
+  // Queue signal for background processing if detected (async, non-blocking)
+  if (relationshipSignal) {
+    queueRelationshipSignal(state.contactId, relationshipSignal, state.messageId);
+  }
+
+  // Only include high-confidence signals in the state for immediate use
+  const highConfidenceSignal = isHighConfidenceSignal(relationshipSignal) ? relationshipSignal : undefined;
+
   try {
     // Quick heuristics for obvious phatic messages
     const quickClassification = quickClassify(state.content);
@@ -25,6 +42,7 @@ export async function routerNode(state: WorkflowState): Promise<Partial<Workflow
         classification: quickClassification,
         classificationLatency: Date.now() - startTime,
         classificationTokens: 0,
+        ...(highConfidenceSignal && { relationshipSignal: highConfidenceSignal }),
       };
     }
 
@@ -37,6 +55,7 @@ export async function routerNode(state: WorkflowState): Promise<Partial<Workflow
     return {
       classification,
       classificationLatency: latency,
+      ...(highConfidenceSignal && { relationshipSignal: highConfidenceSignal }),
     };
   } catch (error: any) {
     console.error('[Router Node] Classification error:', error);
@@ -45,6 +64,7 @@ export async function routerNode(state: WorkflowState): Promise<Partial<Workflow
       classification: 'substantive',
       classificationLatency: Date.now() - startTime,
       error: error.message || 'Classification failed',
+      ...(highConfidenceSignal && { relationshipSignal: highConfidenceSignal }),
     };
   }
 }

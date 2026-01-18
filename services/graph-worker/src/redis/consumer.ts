@@ -7,10 +7,12 @@ import { redisClient } from './client.js';
 import { parseWhatsAppExport, filterTextMessages, groupIntoConversationChunks, ParsedMessage } from '../ingestion/chat-parser.js';
 import { extractEntities, deduplicateEntities } from '../ingestion/entity-extractor.js';
 import { buildGraphFromEntities } from '../ingestion/graph-builder.js';
-import { recordProcessedMessage, updateContactLastInteraction } from '../falkordb/mutations.js';
+import { recordProcessedMessage, updateContactLastInteraction, updateContactRelationshipType } from '../falkordb/mutations.js';
+import { RelationshipAnalyzer, RelationshipType, RelationshipSignal } from '../analysis/relationship-analyzer.js';
 
 const SERVICE_NAME = 'Graph Worker Consumer';
 const REAL_TIME_QUEUE = 'QUEUE:messages_for_extraction';
+const RELATIONSHIP_SIGNALS_QUEUE = 'QUEUE:relationship_signals';
 
 /**
  * Consumer configuration
@@ -58,6 +60,9 @@ class RedisConsumer {
   private config: ConsumerConfig;
   private extractionBatches: Map<string, ExtractionBatch> = new Map();
   private isRunning: boolean = false;
+  private relationshipAnalyzer: RelationshipAnalyzer | null = null;
+  private signalBatches: Map<string, Array<{ signal: RelationshipSignal; timestamp: number }>> = new Map();
+  private lastSignalFlush: number = Date.now();
 
   constructor(config: Partial<ConsumerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -153,6 +158,166 @@ class RedisConsumer {
         console.error(`[${SERVICE_NAME}] Error in real-time consumer:`, error);
         await this.sleep(5000);
       }
+    }
+  }
+
+
+  /**
+   * Start consuming from relationship signals queue (background analysis)
+   * Batches signals by contactId and processes on threshold or timeout
+   */
+  async startRelationshipSignalsConsumer(): Promise<void> {
+    // Initialize the relationship analyzer if not done
+    if (!this.relationshipAnalyzer) {
+      this.relationshipAnalyzer = new RelationshipAnalyzer(redisClient.client);
+    }
+
+    let lastId = '$';
+    const BATCH_THRESHOLD = 10; // Process after 10 signals per contact
+    const FLUSH_INTERVAL_MS = 30000; // Flush every 30 seconds
+
+    console.log(`[${SERVICE_NAME}] Starting relationship signals consumer...`);
+
+    while (this.isRunning) {
+      try {
+        const results = await redisClient.client.xread(
+          'BLOCK',
+          this.config.blockTimeMs,
+          'STREAMS',
+          RELATIONSHIP_SIGNALS_QUEUE,
+          lastId
+        );
+
+        if (results && results.length > 0) {
+          for (const [, entries] of results) {
+            for (const [id, fieldArray] of entries as any[]) {
+              try {
+                const fields: Record<string, string> = {};
+                for (let i = 0; i < fieldArray.length; i += 2) {
+                  fields[fieldArray[i]] = fieldArray[i + 1];
+                }
+
+                // Extract signal from queue message
+                const contactId = fields['contactId'];
+                const type = fields['type'] as RelationshipType;
+                const confidence = parseFloat(fields['confidence'] || '0');
+                const evidence = fields['evidence'] || '';
+                const source = fields['source'] as 'outgoing' | 'incoming' || 'incoming';
+                const timestamp = parseInt(fields['timestamp'] || Date.now().toString(), 10);
+
+                if (!contactId || !type) {
+                  console.warn(`[${SERVICE_NAME}] Skipping signal ${id}: missing contactId or type`);
+                  await redisClient.client.xdel(RELATIONSHIP_SIGNALS_QUEUE, id);
+                  lastId = id;
+                  continue;
+                }
+
+                // Add to batch
+                if (!this.signalBatches.has(contactId)) {
+                  this.signalBatches.set(contactId, []);
+                }
+                this.signalBatches.get(contactId)!.push({
+                  signal: { type, confidence, evidence, source },
+                  timestamp,
+                });
+
+                // Delete from queue
+                await redisClient.client.xdel(RELATIONSHIP_SIGNALS_QUEUE, id);
+                lastId = id;
+
+                // Check if batch threshold reached for this contact
+                const batch = this.signalBatches.get(contactId)!;
+                if (batch.length >= BATCH_THRESHOLD) {
+                  await this.processSignalBatch(contactId);
+                }
+              } catch (error) {
+                console.error(`[${SERVICE_NAME}] Error processing signal ${id}:`, error);
+              }
+            }
+          }
+        }
+
+        // Check for time-based flush
+        const now = Date.now();
+        if (now - this.lastSignalFlush >= FLUSH_INTERVAL_MS) {
+          await this.flushAllSignalBatches();
+          this.lastSignalFlush = now;
+        }
+
+        if (!results || results.length === 0) {
+          lastId = '$';
+        }
+      } catch (error) {
+        console.error(`[${SERVICE_NAME}] Error in relationship signals consumer:`, error);
+        await this.sleep(5000);
+      }
+    }
+  }
+
+  /**
+   * Process accumulated signals for a contact
+   */
+  private async processSignalBatch(contactId: string): Promise<void> {
+    const batch = this.signalBatches.get(contactId);
+    if (!batch || batch.length === 0 || !this.relationshipAnalyzer) return;
+
+    console.log(`[${SERVICE_NAME}] Processing ${batch.length} signals for ${contactId}...`);
+
+    try {
+      // Check for manual override
+      const hasOverride = await this.relationshipAnalyzer.hasManualOverride(contactId);
+      if (hasOverride) {
+        console.log(`[${SERVICE_NAME}] Skipping ${contactId}: manual override set`);
+        this.signalBatches.delete(contactId);
+        return;
+      }
+
+      // Process each signal
+      let analysisResult = null;
+      for (const { signal } of batch) {
+        analysisResult = await this.relationshipAnalyzer.processSignal(contactId, signal);
+      }
+
+      // Check if we should update FalkorDB
+      if (analysisResult && analysisResult.shouldUpdate && analysisResult.newType && analysisResult.newConfidence !== undefined) {
+        console.log(
+          `[${SERVICE_NAME}] Updating ${contactId}: ${analysisResult.newType} (${Math.round(analysisResult.newConfidence * 100)}%) - ${analysisResult.reason}`
+        );
+
+        // Update FalkorDB
+        await updateContactRelationshipType(
+          contactId,
+          analysisResult.newType,
+          analysisResult.newConfidence,
+          'auto_detected'
+        );
+
+        // Mark as updated in analyzer
+        await this.relationshipAnalyzer.markAsUpdated(
+          contactId,
+          analysisResult.newType,
+          analysisResult.newConfidence
+        );
+      }
+
+      // Clear the batch
+      this.signalBatches.delete(contactId);
+    } catch (error) {
+      console.error(`[${SERVICE_NAME}] Error processing signal batch for ${contactId}:`, error);
+    }
+  }
+
+  /**
+   * Flush all pending signal batches
+   */
+  private async flushAllSignalBatches(): Promise<void> {
+    const contactIds = Array.from(this.signalBatches.keys());
+    if (contactIds.length === 0) return;
+
+    console.log(`[${SERVICE_NAME}] Flushing ${contactIds.length} signal batches...`);
+
+    for (const contactId of contactIds) {
+      await this.processSignalBatch(contactId);
     }
   }
 
@@ -393,16 +558,23 @@ export const redisConsumer = new RedisConsumer();
 /**
  * Start the consumer (convenience function)
  */
-export async function startConsumer(mode: 'chat_history' | 'real_time' | 'both' = 'both'): Promise<void> {
-  if (mode === 'chat_history' || mode === 'both') {
+export async function startConsumer(mode: 'chat_history' | 'real_time' | 'both' | 'all' = 'all'): Promise<void> {
+  if (mode === 'chat_history' || mode === 'both' || mode === 'all') {
     redisConsumer.startChatHistoryConsumer().catch((error) => {
       console.error(`[${SERVICE_NAME}] Chat history consumer error:`, error);
     });
   }
 
-  if (mode === 'real_time' || mode === 'both') {
+  if (mode === 'real_time' || mode === 'both' || mode === 'all') {
     redisConsumer.startRealTimeConsumer().catch((error) => {
       console.error(`[${SERVICE_NAME}] Real-time consumer error:`, error);
+    });
+  }
+
+  // Always start relationship signals consumer for background analysis
+  if (mode === 'all') {
+    redisConsumer.startRelationshipSignalsConsumer().catch((error) => {
+      console.error(`[${SERVICE_NAME}] Relationship signals consumer error:`, error);
     });
   }
 }
