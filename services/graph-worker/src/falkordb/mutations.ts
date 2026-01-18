@@ -321,3 +321,71 @@ export async function getGraphStats(): Promise<{
     relationships: 0,
   };
 }
+
+
+/**
+ * Update contact's relationship type from auto-detection
+ * Includes confidence score and source for audit trail
+ */
+export async function updateContactRelationshipType(
+  contactId: string,
+  relationshipType: string,
+  relationshipConfidence: number,
+  relationshipSource: 'auto_detected' | 'manual_override'
+): Promise<void> {
+  const query = `
+    MATCH (c:Contact {id: $contactId})
+    SET c.relationshipType = $relationshipType,
+        c.relationshipConfidence = $relationshipConfidence,
+        c.relationshipSource = $relationshipSource,
+        c.relationshipUpdatedAt = timestamp(),
+        c.updatedAt = timestamp()
+    RETURN c.id
+  `;
+
+  await falkordbClient.query(query, {
+    contactId,
+    relationshipType,
+    relationshipConfidence,
+    relationshipSource,
+  });
+
+  console.log(
+    `[FalkorDB Mutations] Updated relationship for ${contactId}: ${relationshipType} ` +
+      `(${Math.round(relationshipConfidence * 100)}%, source: ${relationshipSource})`
+  );
+}
+
+/**
+ * Get contact relationship details including auto-detection info
+ */
+export async function getContactRelationshipDetails(
+  contactId: string
+): Promise<{
+  relationshipType: string;
+  relationshipConfidence: number | null;
+  relationshipSource: string | null;
+  relationshipUpdatedAt: number | null;
+} | null> {
+  const query = `
+    MATCH (c:Contact {id: $contactId})
+    RETURN c.relationshipType AS relationshipType,
+           c.relationshipConfidence AS relationshipConfidence,
+           c.relationshipSource AS relationshipSource,
+           c.relationshipUpdatedAt AS relationshipUpdatedAt
+  `;
+
+  const results = await falkordbClient.query(query, { contactId });
+
+  if (results.length > 0) {
+    const row = results[0];
+    return {
+      relationshipType: row.relationshipType || 'acquaintance',
+      relationshipConfidence: row.relationshipConfidence ?? null,
+      relationshipSource: row.relationshipSource ?? null,
+      relationshipUpdatedAt: row.relationshipUpdatedAt ?? null,
+    };
+  }
+
+  return null;
+}

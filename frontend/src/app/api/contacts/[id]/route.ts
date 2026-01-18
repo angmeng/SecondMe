@@ -91,7 +91,10 @@ export async function GET(
       MATCH (c:Contact {id: $contactId})
       OPTIONAL MATCH (p:Persona {id: c.assignedPersona})
       RETURN c.id AS id, c.name AS name, c.phoneNumber AS phoneNumber,
-             c.relationshipType AS relationshipType, c.botEnabled AS botEnabled,
+             c.relationshipType AS relationshipType,
+             c.relationshipConfidence AS relationshipConfidence,
+             c.relationshipSource AS relationshipSource,
+             c.botEnabled AS botEnabled,
              c.assignedPersona AS assignedPersona, p.name AS assignedPersonaName,
              c.lastInteraction AS lastInteraction
       LIMIT 1
@@ -109,6 +112,8 @@ export async function GET(
       name: row['name'],
       phoneNumber: row['phoneNumber'] || undefined,
       relationshipType: row['relationshipType'] || 'acquaintance',
+      relationshipConfidence: row['relationshipConfidence'] ?? null,
+      relationshipSource: row['relationshipSource'] ?? null,
       botEnabled: row['botEnabled'] ?? false,
       assignedPersona: row['assignedPersona'] || undefined,
       assignedPersonaName: row['assignedPersonaName'] || undefined,

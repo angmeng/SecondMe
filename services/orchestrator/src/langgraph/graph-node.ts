@@ -177,7 +177,22 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
   try {
     // Get contact info first (needed for persona selection)
     const contactInfo = await getContactInfo(state.contactId);
-    const relationshipType = contactInfo?.relationshipType || 'acquaintance';
+
+    // Determine relationship type:
+    // 1. High-confidence signal from router (real-time detection) takes precedence for THIS request
+    // 2. Fall back to stored relationship type from FalkorDB
+    // 3. Default to 'acquaintance' if nothing found
+    let relationshipType = contactInfo?.relationshipType || 'acquaintance';
+
+    // Check if we have a high-confidence signal from the router
+    // This enables optimistic persona selection based on real-time detection
+    if (state.relationshipSignal && state.relationshipSignal.confidence >= 0.9) {
+      console.log(
+        `[Graph+Persona Node] Using high-confidence signal: ${state.relationshipSignal.type} ` +
+          `(${Math.round(state.relationshipSignal.confidence * 100)}%) instead of stored: ${relationshipType}`
+      );
+      relationshipType = state.relationshipSignal.type;
+    }
 
     // Run graph query and persona retrieval in parallel
     const [graphContext, personaResult] = await Promise.all([

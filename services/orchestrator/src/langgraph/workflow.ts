@@ -18,6 +18,7 @@ import {
   isSleepHours,
   queueDeferredMessage,
 } from '../hts/index.js';
+import { RelationshipSignal } from './relationship-signals.js';
 
 /**
  * Message classification type
@@ -48,6 +49,9 @@ export interface WorkflowState {
   classification?: MessageClassification;
   classificationLatency?: number;
   classificationTokens?: number;
+
+  // Relationship signal (from router - real-time detection)
+  relationshipSignal?: RelationshipSignal;
 
   // Contact information (from graph node)
   contactInfo?: ContactInfo;
@@ -493,6 +497,8 @@ const WorkflowStateAnnotation = Annotation.Root({
   classification: Annotation<MessageClassification | undefined>,
   classificationLatency: Annotation<number | undefined>,
   classificationTokens: Annotation<number | undefined>,
+  // Relationship signal (from router - real-time detection)
+  relationshipSignal: Annotation<RelationshipSignal | undefined>,
   // Graph context
   contactInfo: Annotation<ContactInfo | undefined>,
   relationshipType: Annotation<string | undefined>,

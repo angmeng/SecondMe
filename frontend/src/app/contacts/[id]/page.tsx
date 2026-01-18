@@ -19,6 +19,8 @@ interface Contact {
   name: string;
   phoneNumber?: string;
   relationshipType: string;
+  relationshipConfidence?: number | null;
+  relationshipSource?: 'auto_detected' | 'manual_override' | null;
   botEnabled: boolean;
   assignedPersona?: string;
   assignedPersonaName?: string;
@@ -247,11 +249,29 @@ export default function ConversationPage() {
             />
             <div>
               <h1 className="font-semibold text-slate-900 dark:text-white">{contact.name}</h1>
-              <div className="flex items-center">
+              <div className="flex items-center gap-2">
                 {contact.botEnabled ? (
                   <span className="badge badge-success badge-sm badge-dot">Bot Active</span>
                 ) : (
                   <span className="badge badge-warning badge-sm badge-dot">Bot Paused</span>
+                )}
+                {/* Relationship type with auto-detected badge */}
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {contact.relationshipType.replace('_', ' ')}
+                </span>
+                {contact.relationshipSource === 'auto_detected' && contact.relationshipConfidence && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                      contact.relationshipConfidence >= 0.8
+                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
+                        : contact.relationshipConfidence >= 0.6
+                          ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
+                          : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'
+                    }`}
+                    title={`Auto-detected with ${Math.round(contact.relationshipConfidence * 100)}% confidence`}
+                  >
+                    Auto {Math.round(contact.relationshipConfidence * 100)}%
+                  </span>
                 )}
               </div>
             </div>

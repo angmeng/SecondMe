@@ -31,7 +31,7 @@ interface ParsedMessage {
 
 const TONE_OPTIONS = ['formal', 'casual', 'friendly', 'professional', 'playful'];
 
-const RELATIONSHIP_OPTIONS = ['colleague', 'client', 'manager', 'friend', 'acquaintance', 'family'];
+const RELATIONSHIP_OPTIONS = ['colleague', 'client', 'manager', 'friend', 'acquaintance', 'family', 'romantic_partner'];
 
 export default function CreatePersonaModal({
   isOpen,

@@ -26,7 +26,7 @@ interface PersonaEditorProps {
 
 const TONE_OPTIONS = ['formal', 'casual', 'friendly', 'professional', 'playful'];
 
-const RELATIONSHIP_OPTIONS = ['colleague', 'client', 'manager', 'friend', 'acquaintance', 'family'];
+const RELATIONSHIP_OPTIONS = ['colleague', 'client', 'manager', 'friend', 'acquaintance', 'family', 'romantic_partner'];
 
 // Default personas cannot be deleted
 const DEFAULT_PERSONA_IDS = ['persona-professional', 'persona-casual', 'persona-family'];
