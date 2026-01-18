@@ -36,15 +36,35 @@ export async function POST(request: NextRequest) {
 
 /**
  * DELETE /api/kill-switch - Disable master kill switch (clear global pause)
+ * Safety: Automatically pauses all contacts so user must enable them one by one
  */
 export async function DELETE(_request: NextRequest) {
   try {
+    // Before clearing global pause, set individual pauses for all known contacts
+    // This ensures no contact becomes active automatically - user must enable each manually
+    // First ensure Redis connection by calling a method that does so
+    await redisClient.isGlobalPauseActive();
+    const cached = await redisClient.client.get('CONTACTS:list');
+    if (cached) {
+      const contacts = JSON.parse(cached) as Array<{ id: string }>;
+      const PAUSE_DURATION = 86400 * 365; // 1 year (effectively indefinite)
+
+      // Pause all contacts
+      await Promise.all(
+        contacts.map((contact) => redisClient.setContactPause(contact.id, PAUSE_DURATION))
+      );
+
+      console.log(`[Kill Switch API] Paused ${contacts.length} contacts before disabling global pause`);
+    }
+
+    // Now clear the global pause
     await redisClient.clearGlobalPause();
 
     return NextResponse.json({
       success: true,
       enabled: false,
       timestamp: Date.now(),
+      message: 'Kill switch disabled. All contacts are paused - enable them individually.',
     });
   } catch (error) {
     console.error('[Kill Switch API] Error disabling kill switch:', error);

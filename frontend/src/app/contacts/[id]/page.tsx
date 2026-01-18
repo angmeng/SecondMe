@@ -23,6 +23,9 @@ interface Contact {
   relationshipConfidence?: number | null;
   relationshipSource?: 'auto_detected' | 'manual_override' | null;
   botEnabled: boolean;
+  isPaused?: boolean;
+  isGlobalPaused?: boolean;
+  isContactPaused?: boolean;
   assignedPersona?: string;
   assignedPersonaName?: string;
   lastInteraction?: number;
@@ -62,46 +65,11 @@ export default function ConversationPage() {
     setError(null);
 
     try {
-      // Try to load contact from API
+      // Load contact from API (name fallback is handled server-side)
       const contactResponse = await fetch(`/api/contacts/${contactId}`);
 
       if (contactResponse.ok) {
         const { contact: contactData } = await contactResponse.json();
-
-        // If name is missing or is just the raw contact ID, get it from contacts list (Redis cache)
-        const nameIsMissing = !contactData.name || contactData.name.endsWith('@c.us');
-        console.log('[ConversationPage] Contact from FalkorDB:', { name: contactData.name, nameIsMissing, contactId });
-
-        if (nameIsMissing) {
-          try {
-            const listResponse = await fetch('/api/contacts');
-            if (listResponse.ok) {
-              const { contacts } = await listResponse.json();
-              console.log('[ConversationPage] Contacts from Redis:', contacts.map((c: { id: string; name?: string }) => ({ id: c.id, name: c.name })));
-
-              const decodedContactId = decodeURIComponent(contactId);
-              const cachedContact = contacts.find(
-                (c: { id: string; name?: string }) => c.id === decodedContactId
-              );
-              console.log('[ConversationPage] Matched contact:', cachedContact);
-
-              if (cachedContact?.name && !cachedContact.name.endsWith('@c.us')) {
-                contactData.name = cachedContact.name;
-              } else {
-                // Fallback: derive from contact ID
-                contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
-              }
-            } else {
-              // Fallback if contacts list API fails
-              console.warn('[ConversationPage] Contacts list API returned non-OK:', listResponse.status);
-              contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
-            }
-          } catch (listErr) {
-            console.warn('[ConversationPage] Failed to fetch contacts list for name:', listErr);
-            contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
-          }
-        }
-
         setContact(contactData);
       } else {
         // Fall back to placeholder if API fails
@@ -246,15 +214,19 @@ export default function ConversationPage() {
             <Avatar
               name={contact.name}
               size="md"
-              status={contact.botEnabled ? 'online' : 'offline'}
+              status={contact.isPaused ? 'offline' : 'online'}
             />
             <div>
               <h1 className="font-semibold text-slate-900 dark:text-white">{contact.name}</h1>
               <div className="flex items-center gap-2">
-                {contact.botEnabled ? (
-                  <span className="badge badge-success badge-sm badge-dot">Bot Active</span>
-                ) : (
+                {contact.isGlobalPaused ? (
+                  <span className="badge badge-error badge-sm badge-dot" title="Kill switch is enabled">
+                    Globally Paused
+                  </span>
+                ) : contact.isContactPaused ? (
                   <span className="badge badge-warning badge-sm badge-dot">Bot Paused</span>
+                ) : (
+                  <span className="badge badge-success badge-sm badge-dot">Bot Active</span>
                 )}
                 {/* Relationship type with auto-detected badge */}
                 <span className="text-xs text-slate-500 dark:text-slate-400">
@@ -294,15 +266,48 @@ export default function ConversationPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {/* Toggle bot */}
-            <button
-              className={`btn btn-sm ${
-                contact.botEnabled ? 'btn-ghost text-error-600' : 'btn-secondary'
-              }`}
-              onClick={() => setContact({ ...contact, botEnabled: !contact.botEnabled })}
-            >
-              {contact.botEnabled ? 'Pause Bot' : 'Enable Bot'}
-            </button>
+            {/* Toggle bot pause */}
+            {contact.isGlobalPaused ? (
+              <span
+                className="btn btn-sm btn-ghost cursor-not-allowed text-slate-400"
+                title="Disable the kill switch to enable bot for this contact"
+              >
+                Kill Switch Active
+              </span>
+            ) : (
+              <button
+                className={`btn btn-sm ${
+                  contact.isContactPaused ? 'btn-secondary' : 'btn-ghost text-error-600'
+                }`}
+                onClick={async () => {
+                  try {
+                    if (contact.isContactPaused) {
+                      // Resume: DELETE /api/pause?contactId={id}
+                      const res = await fetch(`/api/pause?contactId=${encodeURIComponent(contact.id)}`, {
+                        method: 'DELETE',
+                      });
+                      if (res.ok) {
+                        setContact({ ...contact, isPaused: false, isContactPaused: false });
+                      }
+                    } else {
+                      // Pause: POST /api/pause with 1 hour duration
+                      const res = await fetch('/api/pause', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contactId: contact.id, duration: 3600 }),
+                      });
+                      if (res.ok) {
+                        setContact({ ...contact, isPaused: true, isContactPaused: true });
+                      }
+                    }
+                  } catch (err) {
+                    console.error('[ConversationPage] Error toggling pause:', err);
+                  }
+                }}
+              >
+                {contact.isContactPaused ? 'Enable Bot' : 'Pause Bot'}
+              </button>
+            )}
 
             {/* More options */}
             <button className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-300">
