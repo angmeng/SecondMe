@@ -276,7 +276,7 @@ export default function ConversationPage() {
             {/* Toggle bot */}
             <button
               className={`btn btn-sm ${
-                contact.botEnabled ? 'btn-ghost text-error-600' : 'btn-primary'
+                contact.botEnabled ? 'btn-ghost text-error-600' : 'btn-secondary'
               }`}
               onClick={() => setContact({ ...contact, botEnabled: !contact.botEnabled })}
             >
@@ -332,7 +332,7 @@ export default function ConversationPage() {
             href={`https://web.whatsapp.com/send?phone=${contact.phoneNumber}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn-primary btn-sm"
+            className="btn btn-secondary btn-sm"
           >
             Open WhatsApp
           </a>

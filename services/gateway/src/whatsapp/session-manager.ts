@@ -334,11 +334,20 @@ export class SessionManager {
   } {
     // Return cached data immediately - don't block on checkSession
     // Session state is updated periodically by the interval and on events
+
+    // If sessionInfo is not set yet or has unknown state, check client.info as fallback
+    // This handles the race condition where getStatus is called before initialize() completes
+    let state = this.sessionInfo?.state || 'unknown';
+    if (state === 'unknown' && this.client.info) {
+      // Client is connected but sessionInfo hasn't been updated yet
+      state = 'CONNECTED';
+    }
+
     return {
-      isActive: this.sessionInfo?.state === 'CONNECTED',
+      isActive: state === 'CONNECTED',
       needsRefresh: this.sessionInfo?.needsRefresh || false,
       timeRemaining: this.getTimeRemaining(),
-      state: this.sessionInfo?.state || 'unknown',
+      state,
       createdAt: this.sessionInfo?.createdAt || null,
       expiresAt: this.sessionInfo?.estimatedExpiryAt || null,
     };

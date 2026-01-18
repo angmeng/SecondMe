@@ -182,6 +182,20 @@ io.on('connection', (socket) => {
     timestamp: Date.now(),
   });
 
+  // Send current session info on connect (if sessionManager is initialized)
+  if (sessionManager) {
+    const sessionStatus = sessionManager.getStatus();
+    socket.emit('session_update', {
+      ...sessionStatus,
+      state: sessionStatus.state,
+      needsRefresh: sessionStatus.needsRefresh,
+      timeRemaining: sessionStatus.timeRemaining,
+      createdAt: sessionStatus.createdAt,
+      estimatedExpiryAt: sessionStatus.expiresAt,
+      timestamp: Date.now(),
+    });
+  }
+
   socket.on('disconnect', () => {
     console.log(`[Gateway] Client disconnected: ${socket.id}`);
   });

@@ -55,7 +55,7 @@ export default function RootLayout({
           <div className="flex min-h-screen">
             <Navigation />
             {/* Main content area - offset for sidebar on desktop, bottom nav on mobile */}
-            <main className="flex-1 pb-20 lg:ml-20 lg:pb-0">
+            <main className="flex-1 pb-20 lg:ml-16 lg:pb-0">
               {children}
             </main>
           </div>

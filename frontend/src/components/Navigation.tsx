@@ -188,7 +188,7 @@ export default function Navigation() {
       {/* Desktop Sidebar */}
       <aside
         className={`fixed left-0 top-0 z-40 hidden h-screen border-r border-slate-200 bg-white transition-all duration-300 ease-smooth dark:border-slate-800 dark:bg-slate-900 lg:block ${
-          isExpanded ? 'w-60' : 'w-16'
+          isExpanded ? 'w-60' : 'w-16 overflow-hidden'
         }`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
