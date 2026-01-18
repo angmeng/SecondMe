@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { socketClient } from '@/lib/socket';
+import { getErrorMessage } from '@/lib/errors';
 
 interface SessionInfo {
   isActive: boolean;
@@ -143,13 +144,13 @@ export default function SessionExpiryCountdown({ className = '', compact = false
         });
         setIsLoading(false);
       }
-    } catch (err: any) {
+    } catch (err) {
       if (retries > 0) {
         console.log(`[SessionExpiry] Error, retrying (${retries} left)...`);
         setTimeout(() => loadSessionInfo(retries - 1), 800);
         return; // Don't set loading false yet
       }
-      console.error('[SessionExpiry] Error loading session info:', err);
+      console.error('[SessionExpiry] Error loading session info:', getErrorMessage(err));
       // Don't show error to user, just set disconnected state
       setSessionInfo({
         isActive: false,
@@ -172,8 +173,8 @@ export default function SessionExpiryCountdown({ className = '', compact = false
       } else {
         setError('Failed to initiate session refresh');
       }
-    } catch (err: any) {
-      console.error('[SessionExpiry] Error refreshing session:', err);
+    } catch (err) {
+      console.error('[SessionExpiry] Error refreshing session:', getErrorMessage(err));
       setError('Failed to initiate session refresh');
     }
   }

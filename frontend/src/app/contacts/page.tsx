@@ -101,7 +101,15 @@ export default function ContactsPage() {
         return;
       }
 
-      const mapped: Contact[] = (data.contacts || []).map((c: any) => ({
+      interface ApiContact {
+        id: string;
+        name?: string;
+        phoneNumber?: string;
+        isPaused?: boolean;
+        expiresAt?: number;
+      }
+
+      const mapped: Contact[] = (data.contacts || []).map((c: ApiContact) => ({
         id: c.id,
         name: c.name || c.phoneNumber || 'Unknown',
         isPaused: c.isPaused || false,

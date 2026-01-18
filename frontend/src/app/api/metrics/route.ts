@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
+import { getErrorMessage } from '@/lib/errors';
 
 /**
  * GET /api/metrics - Get current system metrics
@@ -50,10 +51,10 @@ export async function GET(request: NextRequest) {
       uptime,
       activePauses,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Metrics API] Error getting metrics:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to get metrics' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
 async function getStats(statsKey: string): Promise<Record<string, string>> {
   try {
     // Access the underlying Redis client
-    const client = (redisClient as any).client;
+    const client = redisClient.client;
     if (!client) {
       // If client not directly accessible, use alternative method
       return {};
@@ -88,7 +89,7 @@ async function getStats(statsKey: string): Promise<Record<string, string>> {
  */
 async function getActivePausesCount(): Promise<number> {
   try {
-    const client = (redisClient as any).client;
+    const client = redisClient.client;
     if (!client) return 0;
 
     const keys = await client.keys?.('PAUSE:*');

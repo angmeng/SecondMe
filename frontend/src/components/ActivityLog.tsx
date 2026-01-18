@@ -7,6 +7,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { socketClient } from '@/lib/socket';
+import type {
+  MessageReceivedEvent,
+  MessageSentEvent,
+  PauseUpdateEvent,
+  RateLimitEvent,
+  SessionExpiryWarningEvent,
+  SocketErrorEvent,
+} from '@/lib/socket-types';
 
 export interface ActivityLogEntry {
   id: string;
@@ -49,7 +57,7 @@ export default function ActivityLog({
   useEffect(() => {
     const socket = socketClient.getSocket();
 
-    const handleMessageReceived = (data: any) => {
+    const handleMessageReceived = (data: MessageReceivedEvent) => {
       addEntry({
         id: `recv-${Date.now()}`,
         type: 'message_received',
@@ -60,7 +68,7 @@ export default function ActivityLog({
       });
     };
 
-    const handleMessageSent = (data: any) => {
+    const handleMessageSent = (data: MessageSentEvent) => {
       addEntry({
         id: `sent-${data.messageId || Date.now()}`,
         type: 'message_sent',
@@ -70,7 +78,7 @@ export default function ActivityLog({
       });
     };
 
-    const handlePauseUpdate = (data: any) => {
+    const handlePauseUpdate = (data: PauseUpdateEvent) => {
       addEntry({
         id: `pause-${Date.now()}`,
         type: data.action === 'pause' ? 'pause' : 'resume',
@@ -80,7 +88,7 @@ export default function ActivityLog({
       });
     };
 
-    const handleRateLimit = (data: any) => {
+    const handleRateLimit = (data: RateLimitEvent) => {
       addEntry({
         id: `rate-${Date.now()}`,
         type: 'rate_limit',
@@ -90,7 +98,7 @@ export default function ActivityLog({
       });
     };
 
-    const handleError = (data: any) => {
+    const handleError = (data: SocketErrorEvent) => {
       addEntry({
         id: `error-${Date.now()}`,
         type: 'error',
@@ -99,7 +107,7 @@ export default function ActivityLog({
       });
     };
 
-    const handleSessionUpdate = (data: any) => {
+    const handleSessionUpdate = (data: SessionExpiryWarningEvent) => {
       if (data.needsRefresh) {
         addEntry({
           id: `session-${Date.now()}`,

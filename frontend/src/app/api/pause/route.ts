@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
+import { getErrorMessage } from '@/lib/errors';
 
 /**
  * POST /api/pause - Set pause for contact
@@ -29,10 +30,10 @@ export async function POST(request: NextRequest) {
       duration: pauseDuration,
       expiresAt: Date.now() + pauseDuration * 1000,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Pause API] Error setting pause:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to set pause' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -56,10 +57,10 @@ export async function DELETE(request: NextRequest) {
       success: true,
       contactId,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Pause API] Error clearing pause:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to clear pause' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -85,10 +86,10 @@ export async function GET(request: NextRequest) {
       isPaused,
       expiresAt,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Pause API] Error checking pause:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to check pause' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }

@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
+import { getErrorMessage } from '@/lib/errors';
 
 /**
  * POST /api/kill-switch - Enable master kill switch (global pause)
@@ -24,10 +25,10 @@ export async function POST(request: NextRequest) {
       expiresAt: duration > 0 ? Date.now() + duration * 1000 : null,
       timestamp: Date.now(),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Kill Switch API] Error enabling kill switch:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to enable kill switch' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -45,10 +46,10 @@ export async function DELETE(_request: NextRequest) {
       enabled: false,
       timestamp: Date.now(),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Kill Switch API] Error disabling kill switch:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to disable kill switch' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -65,10 +66,10 @@ export async function GET(_request: NextRequest) {
       enabled: isEnabled,
       timestamp: Date.now(),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Kill Switch API] Error checking kill switch:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to check kill switch' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }

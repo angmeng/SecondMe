@@ -4,6 +4,7 @@
  */
 
 import { NextResponse } from 'next/server';
+import { getErrorMessage } from '@/lib/errors';
 
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
 
@@ -29,10 +30,10 @@ export async function POST() {
     }
 
     return NextResponse.json(data);
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Contacts Refresh API] Error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to connect to Gateway' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }

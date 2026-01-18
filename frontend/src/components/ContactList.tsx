@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { socketClient } from '@/lib/socket';
+import { getErrorMessage } from '@/lib/errors';
 import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { EmptyStateNoContacts } from '@/components/ui/EmptyState';
@@ -140,9 +141,9 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
           )
         );
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('[ContactList] Error toggling contact:', err);
-      setError(err.message || 'Failed to toggle contact');
+      setError(getErrorMessage(err));
       setTimeout(() => setError(null), 3000);
     } finally {
       setLoadingContactId(null);

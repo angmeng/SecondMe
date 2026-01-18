@@ -6,6 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getErrorMessage } from '@/lib/errors';
 
 export default function KillSwitch() {
   const [isEnabled, setIsEnabled] = useState(false);
@@ -26,8 +27,8 @@ export default function KillSwitch() {
       } else {
         setError(data.error || 'Failed to check status');
       }
-    } catch (err: any) {
-      setError(err.message || 'Network error');
+    } catch (err) {
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -54,8 +55,8 @@ export default function KillSwitch() {
       } else {
         setError(data.error || 'Failed to toggle kill switch');
       }
-    } catch (err: any) {
-      setError(err.message || 'Network error');
+    } catch (err) {
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
