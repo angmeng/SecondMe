@@ -194,6 +194,13 @@ ON MATCH SET p.lastMentioned = timestamp()
 RETURN p
 ```
 
+### Troubleshooting
+
+**"Missing parameters" error from FalkorDB:**
+- **Cause**: Using `--params` flag syntax (doesn't work with ioredis)
+- **Fix**: Use CYPHER prefix syntax: `CYPHER param1="value1" MATCH ...`
+- **Example**: See `frontend/src/app/api/persona/route.ts` queryFalkorDB function
+
 ## Error Handling
 
 ```typescript

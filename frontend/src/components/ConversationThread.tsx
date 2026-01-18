@@ -278,22 +278,37 @@ export default function ConversationThread({
               const isOutgoing = message.sender === 'user' || message.sender === 'bot';
               const isBot = message.sender === 'bot';
 
+              // Message grouping logic - detect consecutive messages from same sender
+              const prevMessage = group.messages[messageIndex - 1];
+              const nextMessage = group.messages[messageIndex + 1];
+              const isFirstInGroup = !prevMessage || prevMessage.sender !== message.sender;
+              const isLastInGroup = !nextMessage || nextMessage.sender !== message.sender;
+
               return (
                 <div
                   key={message.id}
-                  className={`mb-2 flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}
+                  className={`${isLastInGroup ? 'mb-3' : 'mb-1'} flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}
                 >
-                  {/* Contact avatar for incoming */}
+                  {/* Contact avatar for incoming - only show on first message of group */}
                   {!isOutgoing && (
-                    <div className="mr-2 flex-shrink-0 self-end">
-                      <Avatar name={contactName} size="sm" />
+                    <div className="mr-2 flex-shrink-0 self-end" style={{ width: 32 }}>
+                      {isFirstInGroup && <Avatar name={contactName} size="sm" />}
                     </div>
                   )}
 
                   {/* Message bubble */}
                   <div className={`max-w-[75%] ${isOutgoing ? 'order-first' : ''}`}>
+                    {/* Bot indicator - only show on first bot message in group */}
+                    {isBot && isFirstInGroup && (
+                      <div className="mb-1 flex items-center gap-1 text-xs text-primary-500/70 dark:text-primary-400/70">
+                        <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2M7.5 13A1.5 1.5 0 006 14.5 1.5 1.5 0 007.5 16 1.5 1.5 0 009 14.5 1.5 1.5 0 007.5 13m9 0a1.5 1.5 0 00-1.5 1.5 1.5 1.5 0 001.5 1.5 1.5 1.5 0 001.5-1.5 1.5 1.5 0 00-1.5-1.5M9 18v1h6v-1H9z"/>
+                        </svg>
+                        <span>Bot</span>
+                      </div>
+                    )}
                     <div
-                      className={`group relative rounded-2xl px-4 py-2 ${
+                      className={`group relative rounded-2xl px-3 py-2 shadow-sm ${
                         isOutgoing
                           ? isBot
                             ? 'bg-primary-100 text-primary-900 dark:bg-primary-900/30 dark:text-primary-100'
@@ -301,36 +316,28 @@ export default function ConversationThread({
                           : 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
                       } ${
                         isOutgoing
-                          ? 'rounded-br-sm'
-                          : 'rounded-bl-sm'
+                          ? isLastInGroup ? 'rounded-br-sm' : ''
+                          : isLastInGroup ? 'rounded-bl-sm' : ''
                       }`}
                     >
-                      {/* Bot indicator */}
-                      {isBot && (
-                        <div className="mb-1 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400">
-                          <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2M7.5 13A1.5 1.5 0 006 14.5 1.5 1.5 0 007.5 16 1.5 1.5 0 009 14.5 1.5 1.5 0 007.5 13m9 0a1.5 1.5 0 00-1.5 1.5 1.5 1.5 0 001.5 1.5 1.5 1.5 0 001.5-1.5 1.5 1.5 0 00-1.5-1.5M9 18v1h6v-1H9z"/>
-                          </svg>
-                          <span>Bot</span>
-                        </div>
-                      )}
-
                       {/* Message content */}
                       <p className="text-sm whitespace-pre-wrap break-words">
                         {message.content}
                       </p>
 
-                      {/* Time and status */}
-                      <div className={`mt-1 flex items-center justify-end gap-1 text-xs ${
-                        isOutgoing
-                          ? isBot
-                            ? 'text-primary-500 dark:text-primary-400'
-                            : 'text-white/70'
-                          : 'text-slate-400'
-                      }`}>
-                        <span>{formatTime(message.timestamp)}</span>
-                        {isOutgoing && message.status && getMessageStatusIcon(message.status)}
-                      </div>
+                      {/* Time and status - only show on last message of group */}
+                      {isLastInGroup && (
+                        <div className={`mt-1 flex items-center justify-end gap-1 text-xs ${
+                          isOutgoing
+                            ? isBot
+                              ? 'text-primary-500 dark:text-primary-400'
+                              : 'text-white/70'
+                            : 'text-slate-400'
+                        }`}>
+                          <span>{formatTime(message.timestamp)}</span>
+                          {isOutgoing && message.status && getMessageStatusIcon(message.status)}
+                        </div>
+                      )}
                     </div>
                   </div>
 

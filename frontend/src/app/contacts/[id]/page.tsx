@@ -64,6 +64,41 @@ export default function ConversationPage() {
 
       if (contactResponse.ok) {
         const { contact: contactData } = await contactResponse.json();
+
+        // If name is missing or is just the raw contact ID, get it from contacts list (Redis cache)
+        const nameIsMissing = !contactData.name || contactData.name.endsWith('@c.us');
+        console.log('[ConversationPage] Contact from FalkorDB:', { name: contactData.name, nameIsMissing, contactId });
+
+        if (nameIsMissing) {
+          try {
+            const listResponse = await fetch('/api/contacts');
+            if (listResponse.ok) {
+              const { contacts } = await listResponse.json();
+              console.log('[ConversationPage] Contacts from Redis:', contacts.map((c: { id: string; name?: string }) => ({ id: c.id, name: c.name })));
+
+              const decodedContactId = decodeURIComponent(contactId);
+              const cachedContact = contacts.find(
+                (c: { id: string; name?: string }) => c.id === decodedContactId
+              );
+              console.log('[ConversationPage] Matched contact:', cachedContact);
+
+              if (cachedContact?.name && !cachedContact.name.endsWith('@c.us')) {
+                contactData.name = cachedContact.name;
+              } else {
+                // Fallback: derive from contact ID
+                contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
+              }
+            } else {
+              // Fallback if contacts list API fails
+              console.warn('[ConversationPage] Contacts list API returned non-OK:', listResponse.status);
+              contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
+            }
+          } catch (listErr) {
+            console.warn('[ConversationPage] Failed to fetch contacts list for name:', listErr);
+            contactData.name = decodeURIComponent(contactId.replace('@c.us', ''));
+          }
+        }
+
         setContact(contactData);
       } else {
         // Fall back to placeholder if API fails
@@ -245,15 +280,12 @@ export default function ConversationPage() {
             />
             <div>
               <h1 className="font-semibold text-slate-900 dark:text-white">{contact.name}</h1>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center">
                 {contact.botEnabled ? (
                   <span className="badge badge-success badge-sm badge-dot">Bot Active</span>
                 ) : (
-                  <span className="badge badge-secondary badge-sm">Bot Paused</span>
+                  <span className="badge badge-warning badge-sm badge-dot">Bot Paused</span>
                 )}
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {contact.relationshipType}
-                </span>
               </div>
             </div>
 
@@ -311,33 +343,29 @@ export default function ConversationPage() {
       </div>
 
       {/* Input area (read-only for now) */}
-      <div className="flex-shrink-0 border-t border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
-              <svg
-                className="h-5 w-5 text-slate-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <span className="text-sm text-slate-500 dark:text-slate-400">
-                Messages are handled by the bot. Open WhatsApp to send messages manually.
-              </span>
-            </div>
+      <div className="flex-shrink-0 border-t border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+            <svg
+              className="h-3.5 w-3.5 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <span>Bot handles messages automatically</span>
           </div>
           <a
             href={`https://wa.me/${contact.phoneNumber}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn-primary"
+            className="btn btn-primary btn-sm"
           >
             Open WhatsApp
           </a>

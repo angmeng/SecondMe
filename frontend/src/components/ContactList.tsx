@@ -6,6 +6,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { socketClient } from '@/lib/socket';
 import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
@@ -317,8 +318,11 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
             style={{ animationDelay: `${index * 50}ms` }}
           >
             <div className="flex items-start justify-between">
-              {/* Contact info */}
-              <div className="flex items-center gap-3">
+              {/* Contact info - clickable to view details */}
+              <Link
+                href={`/contacts/${contact.id}`}
+                className="flex flex-1 items-center gap-3 rounded-lg transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 -m-2 p-2"
+              >
                 <Avatar
                   name={contact.name}
                   size="lg"
@@ -361,7 +365,7 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
                     </p>
                   )}
                 </div>
-              </div>
+              </Link>
 
               {/* Toggle Button */}
               <button
@@ -441,9 +445,11 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
             {/* Action hint - always visible on mobile, hover-only on larger screens */}
             <div className="mt-3 border-t border-slate-100 pt-3 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 dark:border-slate-700">
               <p className="text-xs text-slate-400">
-                {contact.isPaused
-                  ? 'Click to resume automated responses'
-                  : 'Click to pause automated responses for 1 hour'}
+                Click to view details
+                <span className="mx-1.5">·</span>
+                <span className="text-slate-300 dark:text-slate-500">
+                  {contact.isPaused ? 'Resume' : 'Pause'} with button
+                </span>
               </p>
             </div>
           </div>
