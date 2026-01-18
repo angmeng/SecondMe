@@ -75,6 +75,24 @@ export default function Navigation() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(initialStatus);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const prevStatusRef = useRef<ConnectionStatus>(initialStatus);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout>(null);
+
+  // Handle sidebar hover with delay
+  // The 200ms delay prevents accidental expansion when passing through
+  // Clearing on leave ensures quick pass-through doesn't trigger expansion
+  function handleMouseEnter() {
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsExpanded(true);
+    }, 200);
+  }
+
+  function handleMouseLeave() {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    setIsExpanded(false);
+  }
 
   useEffect(() => {
     // Check for dark mode preference
@@ -128,6 +146,9 @@ export default function Navigation() {
     return () => {
       darkModeMediaQuery.removeEventListener('change', handleChange);
       socketClient.offConnectionStatus(handleConnectionStatus);
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
     };
   }, [toast, dismiss, router]);
 
@@ -169,8 +190,8 @@ export default function Navigation() {
         className={`fixed left-0 top-0 z-40 hidden h-screen border-r border-slate-200 bg-white transition-all duration-300 ease-smooth dark:border-slate-800 dark:bg-slate-900 lg:block ${
           isExpanded ? 'w-60' : 'w-16'
         }`}
-        onMouseEnter={() => setIsExpanded(true)}
-        onMouseLeave={() => setIsExpanded(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
       >
         <div className="flex h-full flex-col">
           {/* Logo */}

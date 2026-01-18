@@ -35,6 +35,29 @@ class RedisClient {
    * Ensure connection is established
    */
   private async ensureConnected(): Promise<void> {
+    // Check actual client status, not just our flag
+    // ioredis status: 'wait' | 'reconnecting' | 'connecting' | 'connect' | 'ready' | 'close' | 'end'
+    const status = this.client.status;
+
+    if (status === 'ready' || status === 'connect') {
+      // Already connected
+      this.isInitialized = true;
+      return;
+    }
+
+    if (status === 'connecting' || status === 'reconnecting') {
+      // Wait for connection to complete
+      await new Promise<void>((resolve, reject) => {
+        this.client.once('ready', () => {
+          this.isInitialized = true;
+          resolve();
+        });
+        this.client.once('error', reject);
+      });
+      return;
+    }
+
+    // status is 'wait', 'close', or 'end' - need to connect
     if (!this.isInitialized) {
       try {
         await this.client.connect();

@@ -27,7 +27,6 @@ async function queryFalkorDB(
   query: string,
   params: Record<string, unknown> = {}
 ): Promise<unknown[]> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ioredis = await import('ioredis');
   const Redis = ioredis.default;
 
@@ -39,8 +38,14 @@ async function queryFalkorDB(
   });
 
   try {
-    const paramsJson = JSON.stringify(params);
-    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, query, '--params', paramsJson);
+    // Build CYPHER prefix with parameters
+    // FalkorDB requires: CYPHER param1=value1 param2=value2 MATCH ...
+    const cypherPrefix = Object.entries(params)
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+      .join(' ');
+
+    const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${query}` : query;
+    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
 
     return parseGraphResult(result);
   } finally {
@@ -161,8 +166,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
+    // Use MERGE to create the contact if it doesn't exist
+    // This handles the case where contacts exist in WhatsApp/Redis but not yet in FalkorDB
     const query = `
-      MATCH (c:Contact {id: $contactId})
+      MERGE (c:Contact {id: $contactId})
+      ON CREATE SET c.createdAt = timestamp()
       SET ${setClause.join(', ')}
       RETURN c.id AS id, c.assignedPersona AS assignedPersona
     `;

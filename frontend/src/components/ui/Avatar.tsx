@@ -4,7 +4,7 @@
  */
 
 interface AvatarProps {
-  name: string;
+  name: string | null | undefined;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   src?: string;
   className?: string;
@@ -12,7 +12,7 @@ interface AvatarProps {
 }
 
 // Generate consistent color based on name
-function getColorFromName(name: string): string {
+function getColorFromName(name: string | null | undefined): string {
   const colors: readonly string[] = [
     'bg-primary-500',
     'bg-success-500',
@@ -24,16 +24,18 @@ function getColorFromName(name: string): string {
     'bg-orange-500',
   ] as const;
 
+  const safeName = name || '';
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < safeName.length; i++) {
+    hash = safeName.charCodeAt(i) + ((hash << 5) - hash);
   }
   const index = Math.abs(hash) % colors.length;
   return colors[index] as string;
 }
 
 // Get initials from name
-function getInitials(name: string): string {
+function getInitials(name: string | null | undefined): string {
+  if (!name) return '??';
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
     const first = parts[0]?.[0] || '';
@@ -78,7 +80,7 @@ export default function Avatar({
       {src ? (
         <img
           src={src}
-          alt={name}
+          alt={name || 'Avatar'}
           className={`rounded-full object-cover ${sizeClasses[size]}`}
         />
       ) : (
