@@ -32,7 +32,10 @@ export default function SessionExpiryCountdown({ className = '', compact = false
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadSessionInfo();
+    // Check if WhatsApp was already connected before component mounted
+    const cachedStatus = socketClient.getLastConnectionStatus();
+    const initialRetries = cachedStatus === 'ready' ? 5 : 2;
+    loadSessionInfo(initialRetries);
 
     // Listen for session updates via Socket.io
     const socket = socketClient.getSocket();
@@ -70,6 +73,31 @@ export default function SessionExpiryCountdown({ className = '', compact = false
     socket.on('session_expiry_warning', handleExpiryWarning);
     socket.on('session_expired', handleSessionExpired);
 
+    // Also listen for WhatsApp connection status changes
+    const handleConnectionStatus = (data: {
+      status: 'connected' | 'disconnected' | 'qr' | 'ready';
+    }) => {
+      console.log('[SessionExpiry] Connection status changed:', data.status);
+      if (data.status === 'ready') {
+        // WhatsApp just connected - refresh session info with more retries
+        // (Gateway's sessionManager.handleReauthentication() may still be running)
+        loadSessionInfo(5);
+      } else if (data.status === 'disconnected') {
+        // WhatsApp disconnected - update state immediately
+        setSessionInfo((prev) =>
+          prev
+            ? {
+                ...prev,
+                isActive: false,
+                state: 'DISCONNECTED',
+              }
+            : null
+        );
+      }
+    };
+
+    socketClient.onConnectionStatus(handleConnectionStatus);
+
     // Refresh periodically
     const interval = setInterval(loadSessionInfo, 60000); // Every minute
 
@@ -77,19 +105,34 @@ export default function SessionExpiryCountdown({ className = '', compact = false
       socket.off('session_update', handleSessionUpdate);
       socket.off('session_expiry_warning', handleExpiryWarning);
       socket.off('session_expired', handleSessionExpired);
+      socketClient.offConnectionStatus(handleConnectionStatus);
       clearInterval(interval);
     };
   }, []);
 
-  async function loadSessionInfo() {
+  async function loadSessionInfo(retries = 2) {
     try {
       const response = await fetch('/api/session');
       if (response.ok) {
         const data = await response.json();
+        // If state is UNKNOWN and we have retries, wait and try again
+        // Gateway's sessionManager may still be initializing
+        if (data.state === 'unknown' && retries > 0) {
+          console.log(`[SessionExpiry] State UNKNOWN, retrying (${retries} left)...`);
+          setTimeout(() => loadSessionInfo(retries - 1), 800);
+          return; // Don't set loading false yet
+        }
+        console.log('[SessionExpiry] Session info loaded:', data.state);
         setSessionInfo(data);
         setError(null);
+        setIsLoading(false);
+      } else if (retries > 0) {
+        // Retry after short delay
+        console.log(`[SessionExpiry] Request failed, retrying (${retries} left)...`);
+        setTimeout(() => loadSessionInfo(retries - 1), 800);
+        return; // Don't set loading false yet
       } else {
-        // Set a default disconnected state
+        // Set a default disconnected state on final failure
         setSessionInfo({
           isActive: false,
           needsRefresh: false,
@@ -98,8 +141,14 @@ export default function SessionExpiryCountdown({ className = '', compact = false
           createdAt: null,
           expiresAt: null,
         });
+        setIsLoading(false);
       }
     } catch (err: any) {
+      if (retries > 0) {
+        console.log(`[SessionExpiry] Error, retrying (${retries} left)...`);
+        setTimeout(() => loadSessionInfo(retries - 1), 800);
+        return; // Don't set loading false yet
+      }
       console.error('[SessionExpiry] Error loading session info:', err);
       // Don't show error to user, just set disconnected state
       setSessionInfo({
@@ -110,7 +159,6 @@ export default function SessionExpiryCountdown({ className = '', compact = false
         createdAt: null,
         expiresAt: null,
       });
-    } finally {
       setIsLoading(false);
     }
   }
