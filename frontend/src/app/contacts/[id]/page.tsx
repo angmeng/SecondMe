@@ -106,13 +106,13 @@ export default function ConversationPage() {
         await loadPlaceholderContact();
       }
 
-      // Load placeholder messages (messages API not implemented yet)
-      loadPlaceholderMessages();
+      // Load real messages from WhatsApp
+      await loadMessages();
     } catch (err: any) {
       console.error('[ConversationPage] Error loading data:', err);
       // Fall back to placeholder on error
       await loadPlaceholderContact();
-      loadPlaceholderMessages();
+      await loadMessages();
     } finally {
       setIsLoading(false);
     }
@@ -131,54 +131,21 @@ export default function ConversationPage() {
     setContact(placeholderContact);
   }
 
-  function loadPlaceholderMessages() {
-    // Placeholder messages
-    const placeholderMessages: Message[] = [
-      {
-        id: '1',
-        content: 'Hey! How are you doing?',
-        timestamp: Date.now() - 3600000 * 2,
-        sender: 'contact',
-        status: 'read',
-      },
-      {
-        id: '2',
-        content: "I'm doing great, thanks for asking! Just finished a big project at work.",
-        timestamp: Date.now() - 3600000 * 2 + 60000,
-        sender: 'bot',
-        status: 'read',
-      },
-      {
-        id: '3',
-        content: 'That sounds awesome! What kind of project?',
-        timestamp: Date.now() - 3600000,
-        sender: 'contact',
-        status: 'read',
-      },
-      {
-        id: '4',
-        content: "It's a new feature for our product. Been working on it for months and finally shipped it yesterday!",
-        timestamp: Date.now() - 3600000 + 120000,
-        sender: 'bot',
-        status: 'delivered',
-      },
-      {
-        id: '5',
-        content: 'Congrats! We should celebrate sometime',
-        timestamp: Date.now() - 1800000,
-        sender: 'contact',
-        status: 'read',
-      },
-      {
-        id: '6',
-        content: "Definitely! Let's grab lunch this weekend?",
-        timestamp: Date.now() - 1800000 + 30000,
-        sender: 'user',
-        status: 'read',
-      },
-    ];
+  async function loadMessages() {
+    try {
+      const response = await fetch(`/api/contacts/${contactId}/messages?limit=50`);
 
-    setMessages(placeholderMessages);
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data.messages || []);
+      } else {
+        console.warn('[ConversationPage] Messages API returned non-OK:', response.status);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error('[ConversationPage] Error loading messages:', err);
+      setMessages([]);
+    }
   }
 
   function subscribeToMessages() {
@@ -362,7 +329,7 @@ export default function ConversationPage() {
             <span>Bot handles messages automatically</span>
           </div>
           <a
-            href={`https://wa.me/${contact.phoneNumber}`}
+            href={`https://web.whatsapp.com/send?phone=${contact.phoneNumber}`}
             target="_blank"
             rel="noopener noreferrer"
             className="btn btn-primary btn-sm"

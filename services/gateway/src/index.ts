@@ -22,6 +22,7 @@ import { MessageSender } from './whatsapp/sender.js';
 import { SessionManager } from './whatsapp/session-manager.js';
 import { ContactManager } from './whatsapp/contact-manager.js';
 import { SocketEventEmitter } from './socket/events.js';
+import { fetchChatMessages } from './whatsapp/message-fetcher.js';
 import express from 'express';
 
 const PORT = process.env.GATEWAY_PORT || 3001;
@@ -119,6 +120,52 @@ app.post('/api/contacts/refresh', async (req, res) => {
     console.error('[Gateway] Error refreshing contacts:', error);
     res.status(500).json({
       error: error.message || 'Failed to refresh contacts',
+    });
+  }
+});
+
+// Chat messages endpoint - fetch message history from WhatsApp
+app.get('/api/chats/:contactId/messages', async (req, res) => {
+  try {
+    if (!whatsappClient.isReady()) {
+      return res.status(503).json({
+        error: 'WhatsApp not ready',
+        messages: [],
+      });
+    }
+
+    const { contactId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    // Validate contactId format
+    if (!contactId || !contactId.includes('@')) {
+      return res.status(400).json({
+        error: 'Invalid contact ID format',
+        messages: [],
+      });
+    }
+
+    const messages = await fetchChatMessages(
+      whatsappClient.getClient(),
+      contactId,
+      limit
+    );
+
+    res.json({ messages });
+  } catch (error: any) {
+    console.error('[Gateway] Error fetching messages:', error);
+
+    // Handle specific WhatsApp errors gracefully
+    if (error.message?.includes('not found')) {
+      return res.json({
+        messages: [],
+        error: 'Chat not found',
+      });
+    }
+
+    res.status(500).json({
+      error: error.message || 'Failed to fetch messages',
+      messages: [],
     });
   }
 });
