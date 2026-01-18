@@ -6,6 +6,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getErrorMessage } from '@/lib/errors';
 
 interface SleepHoursConfig {
   enabled: boolean;
@@ -55,8 +56,8 @@ export default function SleepHoursConfig({ className = '' }: Props) {
         setStatus(data.status);
         setDeferredCount(data.deferredCount || 0);
       }
-    } catch (err: any) {
-      console.error('[SleepHoursConfig] Error loading settings:', err);
+    } catch (err) {
+      console.error('[SleepHoursConfig] Error loading settings:', getErrorMessage(err));
       setError('Failed to load settings');
     } finally {
       setIsLoading(false);
@@ -85,8 +86,8 @@ export default function SleepHoursConfig({ className = '' }: Props) {
       setStatus(data.status);
       setSuccess('Sleep hours settings saved');
       setTimeout(() => setSuccess(null), 3000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(getErrorMessage(err));
     } finally {
       setIsSaving(false);
     }

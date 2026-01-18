@@ -13,6 +13,7 @@ import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import PersonaSelector from '@/components/PersonaSelector';
 import { socketClient } from '@/lib/socket';
+import { getErrorMessage } from '@/lib/errors';
 
 interface Contact {
   id: string;
@@ -110,8 +111,8 @@ export default function ConversationPage() {
 
       // Load real messages from WhatsApp
       await loadMessages();
-    } catch (err: any) {
-      console.error('[ConversationPage] Error loading data:', err);
+    } catch (err) {
+      console.error('[ConversationPage] Error loading data:', getErrorMessage(err));
       // Fall back to placeholder on error
       await loadPlaceholderContact();
       await loadMessages();

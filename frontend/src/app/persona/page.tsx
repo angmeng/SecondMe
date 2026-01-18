@@ -10,6 +10,7 @@ import PersonaEditor from '@/components/PersonaEditor';
 import SleepHoursConfig from '@/components/SleepHoursConfig';
 import CreatePersonaModal from '@/components/CreatePersonaModal';
 import { SkeletonCard } from '@/components/ui/Skeleton';
+import { getErrorMessage } from '@/lib/errors';
 import Link from 'next/link';
 
 interface Persona {
@@ -52,9 +53,9 @@ export default function PersonaPage() {
       if (data.personas && data.personas.length > 0) {
         setSelectedPersona(data.personas[0]);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('[PersonaPage] Error loading personas:', err);
-      setError(err.message || 'Failed to load personas');
+      setError(getErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -88,9 +89,9 @@ export default function PersonaPage() {
 
       setSuccessMessage('Persona saved successfully');
       setTimeout(() => setSuccessMessage(null), 3000);
-    } catch (err: any) {
+    } catch (err) {
       console.error('[PersonaPage] Error saving persona:', err);
-      setError(err.message || 'Failed to save persona');
+      setError(getErrorMessage(err));
     } finally {
       setIsSaving(false);
     }

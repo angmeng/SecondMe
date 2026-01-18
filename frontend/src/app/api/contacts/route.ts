@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
+import { getErrorMessage } from '@/lib/errors';
 
 /**
  * GET /api/contacts - Get all cached contacts with pause status
@@ -36,10 +37,10 @@ export async function GET() {
     );
 
     return NextResponse.json({ contacts: enriched });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Contacts API] Error fetching contacts:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch contacts' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }

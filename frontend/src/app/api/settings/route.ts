@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
+import { getErrorMessage } from '@/lib/errors';
 
 /**
  * GET /api/settings - Get all settings
@@ -40,10 +41,10 @@ export async function GET(request: NextRequest) {
         active: globalPauseActive,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Settings API] Error getting settings:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to get settings' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
@@ -110,10 +111,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Unknown settings section' }, { status: 400 });
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Settings API] Error updating settings:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to update settings' },
+      { error: getErrorMessage(error) },
       { status: 500 }
     );
   }
