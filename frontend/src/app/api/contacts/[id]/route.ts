@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { redisClient } from '@/lib/redis-client';
 
 // FalkorDB configuration
 const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
@@ -102,19 +103,84 @@ export async function GET(
 
     const results = await queryFalkorDB(query, { contactId });
 
-    if (results.length === 0) {
-      return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+    // Decode contactId in case it's URL-encoded
+    const decodedContactId = decodeURIComponent(contactId);
+
+    // Get pause status from Redis - check global and contact-specific separately
+    const isGlobalPaused = await redisClient.isGlobalPauseActive();
+    const contactPauseExpiry = await redisClient.getContactPauseExpiration(decodedContactId);
+    const isContactPaused = contactPauseExpiry !== null && Date.now() < contactPauseExpiry;
+    const isPaused = isGlobalPaused || isContactPaused;
+
+    // Try to get contact info from Redis (always has the real name from WhatsApp)
+    let redisContact: { id: string; name?: string; phoneNumber?: string } | undefined;
+    try {
+      const cached = await redisClient.client.get('CONTACTS:list');
+      if (cached) {
+        const contacts = JSON.parse(cached) as Array<{ id: string; name?: string; phoneNumber?: string }>;
+        redisContact = contacts.find(
+          (c) => c.id === decodedContactId || c.id === contactId
+        );
+      }
+    } catch (err) {
+      console.error('[Contact API] Redis lookup failed:', err);
     }
 
+    // If contact not in FalkorDB, use Redis data (or 404 if not in Redis either)
+    if (results.length === 0) {
+      if (!redisContact) {
+        return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+      }
+
+      // Build contact from Redis data only
+      const contact = {
+        id: redisContact.id,
+        name: redisContact.name && !redisContact.name.endsWith('@c.us')
+          ? redisContact.name
+          : decodedContactId.replace('@c.us', ''),
+        phoneNumber: redisContact.phoneNumber || decodedContactId.replace('@c.us', ''),
+        relationshipType: 'acquaintance',
+        relationshipConfidence: null,
+        relationshipSource: null,
+        botEnabled: false,
+        isPaused,
+        isGlobalPaused,
+        isContactPaused,
+        assignedPersona: undefined,
+        assignedPersonaName: undefined,
+        lastInteraction: undefined,
+      };
+
+      return NextResponse.json({ contact });
+    }
+
+    // FalkorDB has the contact - merge with Redis data for name
     const row = results[0] as Record<string, unknown>;
+
+    // Check if name is missing or is a raw ID (ends with @c.us)
+    let contactName = row['name'] as string | undefined;
+    const nameIsMissing = !contactName || contactName.endsWith('@c.us');
+
+    if (nameIsMissing && redisContact?.name && !redisContact.name.endsWith('@c.us')) {
+      contactName = redisContact.name;
+    }
+
+    // Final fallback: strip @c.us suffix
+    if (!contactName || contactName.endsWith('@c.us')) {
+      contactName = decodedContactId.replace('@c.us', '');
+    }
+
     const contact = {
       id: row['id'],
-      name: row['name'],
-      phoneNumber: row['phoneNumber'] || undefined,
+      name: contactName,
+      phoneNumber: row['phoneNumber'] || redisContact?.phoneNumber || undefined,
       relationshipType: row['relationshipType'] || 'acquaintance',
       relationshipConfidence: row['relationshipConfidence'] ?? null,
       relationshipSource: row['relationshipSource'] ?? null,
       botEnabled: row['botEnabled'] ?? false,
+      isPaused,
+      isGlobalPaused,
+      isContactPaused,
       assignedPersona: row['assignedPersona'] || undefined,
       assignedPersonaName: row['assignedPersonaName'] || undefined,
       lastInteraction: row['lastInteraction'] || undefined,
