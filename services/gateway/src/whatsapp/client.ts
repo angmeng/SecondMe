@@ -181,8 +181,27 @@ class WhatsAppClient {
     await this.client.destroy();
   }
 
+  /**
+   * Check if the puppeteer browser is still connected
+   * This helps detect detached frame conditions before they cause errors
+   */
+  isBrowserConnected(): boolean {
+    try {
+      // Access the underlying puppeteer browser
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const browser = (this.client as any).pupBrowser;
+      return browser?.isConnected() ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if the client is ready for operations
+   * Verifies both the ready flag AND the browser connection state
+   */
   isReady(): boolean {
-    return this.ready;
+    return this.ready && this.isBrowserConnected();
   }
 
   getClient(): Client {

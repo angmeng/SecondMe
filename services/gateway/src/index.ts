@@ -22,7 +22,7 @@ import { MessageSender } from './whatsapp/sender.js';
 import { SessionManager } from './whatsapp/session-manager.js';
 import { ContactManager } from './whatsapp/contact-manager.js';
 import { SocketEventEmitter } from './socket/events.js';
-import { fetchChatMessages } from './whatsapp/message-fetcher.js';
+import { fetchChatMessages, WhatsAppDisconnectedError } from './whatsapp/message-fetcher.js';
 import express from 'express';
 
 const PORT = process.env.GATEWAY_PORT || 3001;
@@ -152,11 +152,22 @@ app.get('/api/chats/:contactId/messages', async (req, res) => {
     );
 
     res.json({ messages });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Gateway] Error fetching messages:', error);
 
+    // Handle WhatsApp disconnected/detached frame error
+    if (error instanceof WhatsAppDisconnectedError) {
+      return res.status(503).json({
+        error: error.message,
+        messages: [],
+        needsReconnect: true,
+      });
+    }
+
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch messages';
+
     // Handle specific WhatsApp errors gracefully
-    if (error.message?.includes('not found')) {
+    if (errorMessage.includes('not found')) {
       return res.json({
         messages: [],
         error: 'Chat not found',
@@ -164,7 +175,7 @@ app.get('/api/chats/:contactId/messages', async (req, res) => {
     }
 
     res.status(500).json({
-      error: error.message || 'Failed to fetch messages',
+      error: errorMessage,
       messages: [],
     });
   }
