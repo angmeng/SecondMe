@@ -18,7 +18,7 @@ export interface Contact {
   name: string;
   isPaused: boolean;
   pauseReason?: string;
-  expiresAt?: number;
+  pausedAt?: number;
 }
 
 type FilterType = 'all' | 'active' | 'paused';
@@ -67,7 +67,7 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
       contactId: string;
       action: 'pause' | 'resume';
       reason?: string;
-      expiresAt?: number;
+      pausedAt?: number;
     }) => {
       console.log('[ContactList] Pause update:', data);
 
@@ -78,7 +78,7 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
               ...contact,
               isPaused: data.action === 'pause',
               pauseReason: data.reason,
-              expiresAt: data.expiresAt,
+              pausedAt: data.pausedAt,
             };
           }
           return contact;
@@ -136,7 +136,7 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
         setContacts((prev) =>
           prev.map((c) =>
             c.id === contactId
-              ? { ...c, isPaused: true, pauseReason: 'manual', expiresAt: data.expiresAt }
+              ? { ...c, isPaused: true, pauseReason: 'manual', pausedAt: data.pausedAt ?? Date.now() }
               : c
           )
         );
@@ -150,15 +150,16 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
     }
   }
 
-  function formatTimeRemaining(expiresAt: number): string {
-    const remaining = expiresAt - Date.now();
-    if (remaining <= 0) return 'Expired';
-
-    const minutes = Math.floor(remaining / 60000);
-    if (minutes < 60) return `${minutes}m remaining`;
+  function formatPausedSince(pausedAt: number): string {
+    const elapsed = Date.now() - pausedAt;
+    const minutes = Math.floor(elapsed / 60000);
+    if (minutes < 60) return `Paused ${minutes}m ago`;
 
     const hours = Math.floor(minutes / 60);
-    return `${hours}h ${minutes % 60}m remaining`;
+    if (hours < 24) return `Paused ${hours}h ago`;
+
+    const days = Math.floor(hours / 24);
+    return `Paused ${days}d ago`;
   }
 
   // Loading state with skeleton
@@ -351,8 +352,8 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
                     )}
                   </div>
 
-                  {/* Expiration countdown */}
-                  {contact.expiresAt && contact.expiresAt > Date.now() && (
+                  {/* Paused since indicator */}
+                  {contact.isPaused && contact.pausedAt && (
                     <p className="mt-1.5 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                       <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path
@@ -362,7 +363,7 @@ export default function ContactList({ contacts, setContacts, isLoading }: Contac
                           d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                         />
                       </svg>
-                      {formatTimeRemaining(contact.expiresAt)}
+                      {formatPausedSince(contact.pausedAt)}
                     </p>
                   )}
                 </div>

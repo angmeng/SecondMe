@@ -98,7 +98,7 @@ export class MessageHandler {
 
   /**
    * Handle fromMe message (user sent message manually)
-   * CRITICAL: Auto-pause bot for 60 minutes when user intervenes
+   * CRITICAL: Auto-pause bot indefinitely when user intervenes
    */
   private async handleFromMeMessage(message: Message): Promise<void> {
     const contactId = message.to;
@@ -106,14 +106,12 @@ export class MessageHandler {
 
     console.log(`[Gateway MessageHandler] fromMe message detected to ${contactId}: ${content}`);
 
-    // Auto-pause bot for this contact (60 minutes = 3600 seconds)
-    const pauseDuration = 3600;
-    const expiresAt = Date.now() + pauseDuration * 1000;
+    // Auto-pause bot for this contact (indefinite - no TTL)
+    const pausedAt = Date.now();
 
-    await redisClient.client.setex(
+    await redisClient.client.set(
       `PAUSE:${contactId}`,
-      pauseDuration,
-      expiresAt.toString()
+      JSON.stringify({ pausedAt, reason: 'fromMe' })
     );
 
     // Publish pause event
@@ -123,13 +121,13 @@ export class MessageHandler {
         contactId,
         action: 'pause',
         reason: 'fromMe',
-        expiresAt,
+        pausedAt,
         timestamp: Date.now(),
       })
     );
 
     console.log(
-      `[Gateway MessageHandler] Auto-pause triggered for ${contactId} (60 minutes) due to fromMe message`
+      `[Gateway MessageHandler] Auto-pause triggered for ${contactId} (indefinite) due to fromMe message`
     );
 
     // Emit to frontend for real-time UI update
@@ -137,7 +135,7 @@ export class MessageHandler {
       contactId,
       action: 'pause',
       reason: 'fromMe',
-      expiresAt,
+      pausedAt,
       timestamp: Date.now(),
     });
   }
@@ -178,14 +176,12 @@ export class MessageHandler {
 
       // Check if threshold exceeded
       if (count > threshold) {
-        // Auto-pause for 1 hour
-        const pauseDuration = 3600;
-        const expiresAt = Date.now() + pauseDuration * 1000;
+        // Auto-pause indefinitely (no TTL)
+        const pausedAt = Date.now();
 
-        await redisClient.client.setex(
+        await redisClient.client.set(
           `PAUSE:${contactId}`,
-          pauseDuration,
-          expiresAt.toString()
+          JSON.stringify({ pausedAt, reason: 'rate_limit' })
         );
 
         // Publish rate limit event
@@ -197,7 +193,7 @@ export class MessageHandler {
             reason: 'rate_limit',
             count,
             threshold,
-            expiresAt,
+            pausedAt,
             timestamp: Date.now(),
           })
         );
@@ -207,7 +203,7 @@ export class MessageHandler {
           contactId,
           count,
           threshold,
-          expiresAt,
+          pausedAt,
           timestamp: Date.now(),
         });
 

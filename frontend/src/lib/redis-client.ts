@@ -106,17 +106,21 @@ class RedisClient {
   }
 
   /**
-   * Set contact-specific pause
+   * Set contact-specific pause (indefinite - no TTL)
    */
-  async setContactPause(contactId: string, duration: number): Promise<void> {
+  async setContactPause(contactId: string, _duration?: number): Promise<void> {
     await this.ensureConnected();
 
-    const expiresAt = Date.now() + duration * 1000;
+    // Set pause without TTL - contact stays paused until manually unpaused
+    await this.client.set(
+      `PAUSE:${contactId}`,
+      JSON.stringify({
+        pausedAt: Date.now(),
+        reason: 'manual',
+      })
+    );
 
-    // Set pause with TTL
-    await this.client.setex(`PAUSE:${contactId}`, duration, expiresAt.toString());
-
-    console.log(`[Frontend Redis] Contact pause set: ${contactId} (duration: ${duration}s)`);
+    console.log(`[Frontend Redis] Contact pause set: ${contactId} (indefinite)`);
   }
 
   /**
@@ -138,25 +142,27 @@ class RedisClient {
     const globalPause = await this.isGlobalPauseActive();
     if (globalPause) return true;
 
-    // Check contact-specific pause
-    const contactPause = await this.client.get(`PAUSE:${contactId}`);
-    if (contactPause) {
-      const expiresAt = parseInt(contactPause, 10);
-      return Date.now() < expiresAt;
-    }
-
-    return false;
+    // Check contact-specific pause (key exists = paused)
+    const contactPause = await this.client.exists(`PAUSE:${contactId}`);
+    return contactPause === 1;
   }
 
   /**
-   * Get contact pause expiration time
+   * Get contact pause info (pausedAt timestamp and reason)
    */
-  async getContactPauseExpiration(contactId: string): Promise<number | null> {
+  async getContactPauseInfo(
+    contactId: string
+  ): Promise<{ pausedAt: number; reason: string } | null> {
     await this.ensureConnected();
 
     const contactPause = await this.client.get(`PAUSE:${contactId}`);
     if (contactPause) {
-      return parseInt(contactPause, 10);
+      try {
+        return JSON.parse(contactPause);
+      } catch {
+        // Legacy format (timestamp string) - treat as paused
+        return { pausedAt: parseInt(contactPause, 10), reason: 'legacy' };
+      }
     }
 
     return null;

@@ -8,27 +8,24 @@ import { redisClient } from '@/lib/redis-client';
 import { getErrorMessage } from '@/lib/errors';
 
 /**
- * POST /api/pause - Set pause for contact
- * Body: { contactId: string, duration: number }
+ * POST /api/pause - Set pause for contact (indefinite)
+ * Body: { contactId: string }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { contactId, duration } = body;
+    const { contactId } = body;
 
     if (!contactId) {
       return NextResponse.json({ error: 'contactId is required' }, { status: 400 });
     }
 
-    const pauseDuration = duration || 3600; // Default 1 hour
-
-    await redisClient.setContactPause(contactId, pauseDuration);
+    await redisClient.setContactPause(contactId);
 
     return NextResponse.json({
       success: true,
       contactId,
-      duration: pauseDuration,
-      expiresAt: Date.now() + pauseDuration * 1000,
+      pausedAt: Date.now(),
     });
   } catch (error) {
     console.error('[Pause API] Error setting pause:', error);
@@ -79,12 +76,13 @@ export async function GET(request: NextRequest) {
     }
 
     const isPaused = await redisClient.isContactPaused(contactId);
-    const expiresAt = await redisClient.getContactPauseExpiration(contactId);
+    const pauseInfo = await redisClient.getContactPauseInfo(contactId);
 
     return NextResponse.json({
       contactId,
       isPaused,
-      expiresAt,
+      pausedAt: pauseInfo?.pausedAt ?? null,
+      reason: pauseInfo?.reason ?? null,
     });
   } catch (error) {
     console.error('[Pause API] Error checking pause:', error);

@@ -108,8 +108,8 @@ export async function GET(
 
     // Get pause status from Redis - check global and contact-specific separately
     const isGlobalPaused = await redisClient.isGlobalPauseActive();
-    const contactPauseExpiry = await redisClient.getContactPauseExpiration(decodedContactId);
-    const isContactPaused = contactPauseExpiry !== null && Date.now() < contactPauseExpiry;
+    const pauseInfo = await redisClient.getContactPauseInfo(decodedContactId);
+    const isContactPaused = pauseInfo !== null;
     const isPaused = isGlobalPaused || isContactPaused;
 
     // Try to get contact info from Redis (always has the real name from WhatsApp)

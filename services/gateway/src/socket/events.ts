@@ -41,7 +41,7 @@ export class SocketEventEmitter {
     contactId: string;
     action: 'pause' | 'resume';
     reason?: string;
-    expiresAt?: number;
+    pausedAt?: number;
   }): void {
     this.io.emit('pause_update', {
       ...data,
@@ -123,7 +123,7 @@ export class SocketEventEmitter {
     contactId: string;
     count: number;
     threshold: number;
-    expiresAt: number;
+    pausedAt: number;
   }): void {
     this.io.emit('rate_limit', {
       ...data,
