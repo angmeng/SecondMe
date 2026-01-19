@@ -110,17 +110,14 @@ async function checkPauseNode(state: WorkflowState): Promise<Partial<WorkflowSta
     };
   }
 
-  // Check contact-specific pause
-  const contactPause = await redisClient.client.get(`PAUSE:${state.contactId}`);
-  if (contactPause) {
-    const expiresAt = parseInt(contactPause, 10);
-    if (Date.now() < expiresAt) {
-      console.log(`[Workflow] Contact pause active for ${state.contactId}, skipping message`);
-      return {
-        isPaused: true,
-        pauseReason: 'contact',
-      };
-    }
+  // Check contact-specific pause (key exists = paused, indefinite duration)
+  const contactPause = await redisClient.client.exists(`PAUSE:${state.contactId}`);
+  if (contactPause === 1) {
+    console.log(`[Workflow] Contact pause active for ${state.contactId}, skipping message`);
+    return {
+      isPaused: true,
+      pauseReason: 'contact',
+    };
   }
 
   return {
