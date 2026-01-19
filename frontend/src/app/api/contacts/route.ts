@@ -29,11 +29,15 @@ export async function GET() {
 
     // Enrich with pause status
     const enriched = await Promise.all(
-      contacts.map(async (c: { id: string; name: string; phoneNumber: string }) => ({
-        ...c,
-        isPaused: isGlobalPaused || (await redisClient.isContactPaused(c.id)),
-        expiresAt: await redisClient.getContactPauseExpiration(c.id),
-      }))
+      contacts.map(async (c: { id: string; name: string; phoneNumber: string }) => {
+        const pauseInfo = await redisClient.getContactPauseInfo(c.id);
+        return {
+          ...c,
+          isPaused: isGlobalPaused || (await redisClient.isContactPaused(c.id)),
+          pausedAt: pauseInfo?.pausedAt ?? null,
+          pauseReason: pauseInfo?.reason ?? null,
+        };
+      })
     );
 
     return NextResponse.json({ contacts: enriched });

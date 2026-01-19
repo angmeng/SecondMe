@@ -101,14 +101,9 @@ class OrchestratorRedisClient {
       return true;
     }
 
-    // Check contact-specific pause
-    const contactPause = await this.client.get(`PAUSE:${contactId}`);
-    if (contactPause) {
-      const expiresAt = parseInt(contactPause, 10);
-      return Date.now() < expiresAt;
-    }
-
-    return false;
+    // Check contact-specific pause (key exists = paused, no TTL expiration)
+    const contactPause = await this.client.exists(`PAUSE:${contactId}`);
+    return contactPause === 1;
   }
 
   /**
@@ -123,17 +118,23 @@ class OrchestratorRedisClient {
     }
 
     if (count > 10) {
-      // Trigger auto-pause
-      const expiresAt = Date.now() + 3600000; // 1 hour
-      await this.client.setex(`PAUSE:${contactId}`, 3600, expiresAt.toString());
+      // Trigger auto-pause (indefinite - no TTL)
+      const pausedAt = Date.now();
+      await this.client.set(
+        `PAUSE:${contactId}`,
+        JSON.stringify({ pausedAt, reason: 'rate_limit' })
+      );
 
-      await this.publish('events:pause', JSON.stringify({
-        contactId,
-        action: 'pause',
-        reason: 'rate_limit',
-        expiresAt,
-        timestamp: Date.now(),
-      }));
+      await this.publish(
+        'events:pause',
+        JSON.stringify({
+          contactId,
+          action: 'pause',
+          reason: 'rate_limit',
+          pausedAt,
+          timestamp: Date.now(),
+        })
+      );
 
       console.log(`[Orchestrator Redis] Rate limit exceeded for ${contactId}, auto-paused`);
       return false;

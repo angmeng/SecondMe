@@ -110,30 +110,32 @@ class RedisClient {
       return true;
     }
 
-    // Check contact-specific pause
-    const contactPause = await this.client.get(`PAUSE:${contactId}`);
-    if (contactPause) {
-      const expiresAt = parseInt(contactPause, 10);
-      return Date.now() < expiresAt;
-    }
-
-    return false;
+    // Check contact-specific pause (key exists = paused, no TTL expiration)
+    const contactPause = await this.client.exists(`PAUSE:${contactId}`);
+    return contactPause === 1;
   }
 
   /**
-   * Set pause state for contact
+   * Set pause state for contact (indefinite - no TTL)
    */
-  async setPause(contactId: string, durationSeconds: number = 3600): Promise<void> {
-    const expiresAt = Date.now() + durationSeconds * 1000;
-    await this.client.setex(`PAUSE:${contactId}`, durationSeconds, expiresAt.toString());
+  async setPause(contactId: string, reason: string = 'manual'): Promise<void> {
+    const pausedAt = Date.now();
+    await this.client.set(
+      `PAUSE:${contactId}`,
+      JSON.stringify({ pausedAt, reason })
+    );
 
     // Publish pause event
-    await this.publish('events:pause', JSON.stringify({
-      contactId,
-      action: 'pause',
-      expiresAt,
-      timestamp: Date.now(),
-    }));
+    await this.publish(
+      'events:pause',
+      JSON.stringify({
+        contactId,
+        action: 'pause',
+        reason,
+        pausedAt,
+        timestamp: Date.now(),
+      })
+    );
   }
 
   /**

@@ -31,7 +31,7 @@ export interface PauseUpdateEvent {
   contactId: string;
   action: 'pause' | 'resume';
   reason?: string;
-  expiresAt?: number;
+  pausedAt?: number;
 }
 
 /**

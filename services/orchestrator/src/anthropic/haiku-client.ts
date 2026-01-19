@@ -28,7 +28,7 @@ class HaikuClient {
       const startTime = Date.now();
 
       const response = await this.client.messages.create({
-        model: 'claude-haiku-4.5-20250514',
+        model: 'claude-haiku-4-5-20250514',
         max_tokens: 50,
         temperature: 0.0, // Deterministic classification
         messages: [
@@ -83,7 +83,7 @@ Classification (respond with only "phatic" or "substantive"):`,
       const startTime = Date.now();
 
       const response = await this.client.messages.create({
-        model: 'claude-haiku-4.5-20250514',
+        model: 'claude-haiku-4-5-20250514',
         max_tokens: 200,
         temperature: 0.7,
         system: `You are responding on behalf of someone. Match their communication style exactly:

@@ -51,17 +51,18 @@ class FalkorDBClient {
 
   /**
    * Execute a Cypher query with parameters
+   * Uses CYPHER prefix syntax for parameter passing (--params flag doesn't work with ioredis)
    */
   async query(cypherQuery: string, params: Record<string, any> = {}): Promise<any[]> {
     try {
-      const paramsJson = JSON.stringify(params);
-      const result = await this.client.call(
-        'GRAPH.QUERY',
-        GRAPH_NAME,
-        cypherQuery,
-        '--params',
-        paramsJson
-      );
+      // Build CYPHER prefix for parameters (correct FalkorDB syntax with ioredis)
+      const cypherPrefix = Object.entries(params)
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+        .join(' ');
+
+      const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${cypherQuery}` : cypherQuery;
+
+      const result = await this.client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
 
       return this.parseGraphResult(result);
     } catch (error) {
