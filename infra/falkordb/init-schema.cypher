@@ -22,6 +22,18 @@ CREATE INDEX ON :Topic(category);
 CREATE INDEX ON :Event(date);
 
 // ============================================================================
+// VECTOR INDEXES - Semantic RAG Support
+// ============================================================================
+
+// Vector indexes for semantic search (Voyage AI embeddings, 1024 dimensions)
+// Note: These indexes are created on node properties that will be populated
+// by the entity embedder during ingestion
+CREATE VECTOR INDEX FOR (t:Topic) ON (t.embedding) OPTIONS {dimension:1024, similarityFunction:'cosine'};
+CREATE VECTOR INDEX FOR (p:Person) ON (p.embedding) OPTIONS {dimension:1024, similarityFunction:'cosine'};
+CREATE VECTOR INDEX FOR (e:Event) ON (e.embedding) OPTIONS {dimension:1024, similarityFunction:'cosine'};
+CREATE VECTOR INDEX FOR (c:Company) ON (c.embedding) OPTIONS {dimension:1024, similarityFunction:'cosine'};
+
+// ============================================================================
 // INITIAL DATA - User Node
 // ============================================================================
 

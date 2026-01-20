@@ -10,9 +10,12 @@ import {
   getPersonaForContact,
   getDefaultPersona,
   getPersonaById,
+  getContactStyleProfile,
   PersonaContext,
 } from '../falkordb/queries.js';
 import { personaCache } from '../redis/persona-cache.js';
+import { getStyleProfileWithCache } from '../redis/style-cache.js';
+import { retrieveContext, isSemanticRagEnabled } from '../retrieval/index.js';
 
 // Default user ID (single-user MVP)
 const DEFAULT_USER_ID = 'user-1';
@@ -194,16 +197,28 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
       relationshipType = state.relationshipSignal.type;
     }
 
-    // Run graph query and persona retrieval in parallel
-    const [graphContext, personaResult] = await Promise.all([
-      getContactContext(state.contactId),
+    // Run graph query, persona retrieval, and style profile in parallel
+    // Use semantic retrieval if enabled, otherwise fall back to legacy
+    const [retrievalResult, personaResult, styleProfile] = await Promise.all([
+      retrieveContext(state.content, state.contactId),
       getPersonaWithCache(relationshipType, contactInfo?.assignedPersona),
+      getStyleProfileWithCache(state.contactId, () => getContactStyleProfile(state.contactId)),
     ]);
 
+    const graphContext = retrievalResult.context;
     const latency = Date.now() - startTime;
 
+    // Log retrieval method and stats
+    const methodInfo = isSemanticRagEnabled()
+      ? `method: ${retrievalResult.method}, cached: ${retrievalResult.stats?.embeddingCached ?? 'n/a'}`
+      : 'method: legacy (semantic disabled)';
+
+    const styleInfo = styleProfile ? `style: ${styleProfile.sampleCount} samples` : 'style: none';
+
     console.log(
-      `[Graph+Persona Node] Retrieved in ${latency}ms: ${graphContext.people.length} people, ${graphContext.topics.length} topics, persona: ${personaResult.persona?.name}`
+      `[Graph+Persona Node] Retrieved in ${latency}ms (${methodInfo}): ` +
+        `${graphContext.people.length} people, ${graphContext.topics.length} topics, ` +
+        `${graphContext.events.length} events, persona: ${personaResult.persona?.name}, ${styleInfo}`
     );
 
     return {
@@ -213,6 +228,7 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
       graphQueryLatency: latency,
       ...(personaResult.persona && { persona: personaResult.persona }),
       personaCached: personaResult.cached,
+      ...(styleProfile && { styleProfile }),
     };
   } catch (error: any) {
     console.error('[Graph+Persona Node] Error:', error);

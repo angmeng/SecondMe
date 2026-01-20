@@ -1,10 +1,12 @@
 /**
  * Graph Builder - Converts extracted entities to graph mutations
  * User Story 2: Transforms entity extraction results into FalkorDB operations
+ * Includes Semantic RAG: Generates embeddings for entities during ingestion
  */
 
 import { ExtractedEntity, ExtractedRelationship } from './entity-extractor.js';
 import { falkordbClient } from '../falkordb/client.js';
+import { embedEntities, isEmbeddingEnabled } from '../embeddings/index.js';
 
 /**
  * Graph mutation result
@@ -13,6 +15,8 @@ export interface GraphMutationResult {
   nodesCreated: number;
   nodesUpdated: number;
   relationshipsCreated: number;
+  entitiesEmbedded: number;
+  embeddingTokensUsed: number;
   errors: string[];
   latencyMs: number;
 }
@@ -33,6 +37,8 @@ class GraphBuilder {
       nodesCreated: 0,
       nodesUpdated: 0,
       relationshipsCreated: 0,
+      entitiesEmbedded: 0,
+      embeddingTokensUsed: 0,
       errors: [],
       latencyMs: 0,
     };
@@ -57,10 +63,31 @@ class GraphBuilder {
       }
     }
 
+    // Generate embeddings for entities (Semantic RAG)
+    if (isEmbeddingEnabled() && entities.length > 0) {
+      try {
+        const embeddingResult = await embedEntities(entities);
+        result.entitiesEmbedded = embeddingResult.successful.length;
+        result.embeddingTokensUsed = embeddingResult.totalTokensUsed;
+
+        if (embeddingResult.failed.length > 0) {
+          result.errors.push(
+            `Failed to embed ${embeddingResult.failed.length} entities: ${embeddingResult.failed.slice(0, 3).join(', ')}${embeddingResult.failed.length > 3 ? '...' : ''}`
+          );
+        }
+      } catch (error: any) {
+        console.error(`[Graph Builder] Embedding error:`, error);
+        result.errors.push(`Embedding failed: ${error.message}`);
+      }
+    }
+
     result.latencyMs = Date.now() - startTime;
 
+    const embeddingInfo = isEmbeddingEnabled()
+      ? `, ${result.entitiesEmbedded} embedded (~${result.embeddingTokensUsed} tokens)`
+      : '';
     console.log(
-      `[Graph Builder] Completed in ${result.latencyMs}ms: ${result.nodesCreated} nodes created, ${result.nodesUpdated} updated, ${result.relationshipsCreated} relationships`
+      `[Graph Builder] Completed in ${result.latencyMs}ms: ${result.nodesCreated} nodes created, ${result.nodesUpdated} updated, ${result.relationshipsCreated} relationships${embeddingInfo}`
     );
 
     return result;

@@ -10,7 +10,7 @@ import { haikuClient } from '../anthropic/haiku-client.js';
 import { redisClient } from '../redis/client.js';
 import { routerNode } from './router-node.js';
 import { graphAndPersonaNode } from './graph-node.js';
-import { ContactContext, PersonaContext, ContactInfo } from '../falkordb/queries.js';
+import { ContactContext, PersonaContext, ContactInfo, StyleProfile } from '../falkordb/queries.js';
 import {
   calculateTypingDelay as calculateHTSTypingDelay,
   calculateCognitivePause,
@@ -64,6 +64,9 @@ export interface WorkflowState {
   // Persona (from graph node)
   persona?: PersonaContext;
   personaCached?: boolean;
+
+  // Style profile (from graph node - per-contact communication patterns)
+  styleProfile?: StyleProfile;
 
   // Response generation
   response?: string;
@@ -263,11 +266,16 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       events: [],
     };
 
-    // Call Sonnet with context
-    const result = await sonnetClient.getContextualResponse(state.content, persona.styleGuide, {
-      people: context.people,
-      topics: context.topics,
-    });
+    // Call Sonnet with context and style profile
+    const result = await sonnetClient.getContextualResponse(
+      state.content,
+      persona.styleGuide,
+      {
+        people: context.people,
+        topics: context.topics,
+      },
+      state.styleProfile // Pass contact-specific style profile
+    );
 
     const latency = Date.now() - startTime;
     console.log(

@@ -4,6 +4,7 @@
  */
 
 import { falkordbClient } from './client.js';
+import type { StyleProfile } from '../analysis/style-profile.js';
 
 /**
  * Create or update a message node (for tracking processed messages)
@@ -388,4 +389,50 @@ export async function getContactRelationshipDetails(
   }
 
   return null;
+}
+
+/**
+ * Update contact's style profile from accumulated analysis
+ * Stores style characteristics on the Contact node
+ */
+export async function updateContactStyleProfile(
+  contactId: string,
+  profile: StyleProfile
+): Promise<void> {
+  // Serialize complex objects to JSON strings for FalkorDB storage
+  const punctuationJson = JSON.stringify(profile.punctuationStyle);
+  const greetingsJson = JSON.stringify(profile.greetingStyle);
+  const signOffsJson = JSON.stringify(profile.signOffStyle);
+
+  const query = `
+    MATCH (c:Contact {id: $contactId})
+    SET c.styleAvgLength = $avgMessageLength,
+        c.styleEmojiFreq = $emojiFrequency,
+        c.styleFormalityScore = $formalityScore,
+        c.stylePunctuationData = $punctuationJson,
+        c.styleGreetings = $greetingsJson,
+        c.styleSignOffs = $signOffsJson,
+        c.styleSampleCount = $sampleCount,
+        c.styleUpdatedAt = $lastUpdated,
+        c.updatedAt = timestamp()
+    RETURN c.id
+  `;
+
+  await falkordbClient.query(query, {
+    contactId,
+    avgMessageLength: profile.avgMessageLength,
+    emojiFrequency: profile.emojiFrequency,
+    formalityScore: profile.formalityScore,
+    punctuationJson,
+    greetingsJson,
+    signOffsJson,
+    sampleCount: profile.sampleCount,
+    lastUpdated: profile.lastUpdated,
+  });
+
+  console.log(
+    `[FalkorDB Mutations] Updated style profile for ${contactId}: ` +
+      `avgLen=${Math.round(profile.avgMessageLength)}, formality=${profile.formalityScore.toFixed(2)}, ` +
+      `samples=${profile.sampleCount}`
+  );
 }

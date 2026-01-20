@@ -4,6 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { StyleProfile } from '../falkordb/queries.js';
 
 const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 
@@ -33,16 +34,17 @@ class SonnetClient {
   async getContextualResponse(
     content: string,
     personaStyleGuide: string,
-    graphContext: { people: any[]; topics: any[] }
+    graphContext: { people: any[]; topics: any[] },
+    styleProfile?: StyleProfile | null
   ): Promise<ContextualResponse> {
     try {
       const startTime = Date.now();
 
-      // Build cached system prompt with persona and graph schema
-      const systemPrompt = this.buildCachedSystemPrompt(personaStyleGuide, graphContext);
+      // Build cached system prompt with persona, graph schema, and style profile
+      const systemPrompt = this.buildCachedSystemPrompt(personaStyleGuide, graphContext, styleProfile);
 
       const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-5-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1024,
         temperature: 0.7,
         system: systemPrompt,
@@ -79,14 +81,18 @@ class SonnetClient {
   }
 
   /**
-   * Build system prompt with caching for persona and context
+   * Build system prompt with caching for persona, context, and style profile
    */
   private buildCachedSystemPrompt(
     personaStyleGuide: string,
-    graphContext: { people: any[]; topics: any[] }
+    graphContext: { people: any[]; topics: any[] },
+    styleProfile?: StyleProfile | null
   ): Anthropic.Messages.TextBlockParam[] {
     // Format graph context as readable text
     const contextText = this.formatGraphContext(graphContext);
+
+    // Format style profile if available
+    const styleText = styleProfile ? this.formatStyleProfile(styleProfile) : null;
 
     // Return array of system message blocks with cache control
     return [
@@ -112,6 +118,16 @@ ${contextText}
 Use this context naturally in your response when relevant. Don't force it if it doesn't fit.`,
         cache_control: { type: 'ephemeral' }, // Cache graph context
       },
+      // Style profile block (only if available with sufficient samples)
+      ...(styleText
+        ? [
+            {
+              type: 'text' as const,
+              text: styleText,
+              cache_control: { type: 'ephemeral' as const }, // Cache style profile
+            },
+          ]
+        : []),
       {
         type: 'text',
         text: `RESPONSE GUIDELINES:
@@ -123,6 +139,79 @@ Use this context naturally in your response when relevant. Don't force it if it 
 - Keep responses concise (typically 1-3 sentences for WhatsApp)`,
       },
     ];
+  }
+
+  /**
+   * Format style profile for prompt injection
+   * Returns null if insufficient samples (< 10 messages)
+   */
+  private formatStyleProfile(profile: StyleProfile): string | null {
+    // Require minimum samples for reliable style inference
+    if (profile.sampleCount < 10) {
+      return null;
+    }
+
+    // Describe message length
+    const lengthDesc =
+      profile.avgMessageLength < 50
+        ? 'brief'
+        : profile.avgMessageLength < 100
+          ? 'moderate'
+          : 'detailed';
+
+    // Describe emoji usage
+    const emojiDesc =
+      profile.emojiFrequency < 0.2
+        ? 'rarely use emojis'
+        : profile.emojiFrequency < 0.8
+          ? 'occasionally use emojis'
+          : 'frequently use emojis';
+
+    // Describe formality
+    const formalityDesc =
+      profile.formalityScore < 0.3
+        ? 'casual'
+        : profile.formalityScore < 0.7
+          ? 'semi-formal'
+          : 'formal';
+
+    // Build style notes from punctuation patterns
+    const styleNotes: string[] = [];
+
+    if (profile.punctuationStyle?.usesEllipsis) {
+      styleNotes.push('You often use ellipsis (...)');
+    }
+    if (profile.punctuationStyle?.exclamationFrequency > 0.3) {
+      styleNotes.push('You frequently use exclamation marks!');
+    }
+    if (profile.punctuationStyle?.endsWithPeriod === false) {
+      styleNotes.push('You often skip ending periods');
+    }
+
+    // Format greetings if available
+    const greetingsLine =
+      profile.greetingStyle && profile.greetingStyle.length > 0
+        ? `- Common greetings you use: "${profile.greetingStyle.slice(0, 3).join('", "')}"`
+        : '';
+
+    // Format sign-offs if available
+    const signOffsLine =
+      profile.signOffStyle && profile.signOffStyle.length > 0
+        ? `- Common sign-offs you use: "${profile.signOffStyle.slice(0, 3).join('", "')}"`
+        : '';
+
+    const styleNotesText = styleNotes.map((note) => `- ${note}`).join('\n');
+
+    return `YOUR MESSAGING STYLE WITH THIS CONTACT:
+Based on ${profile.sampleCount} of your previous messages to this person:
+- Message length: ${lengthDesc} (~${Math.round(profile.avgMessageLength)} characters)
+- Emoji usage: ${emojiDesc}
+- Tone: ${formalityDesc}
+${greetingsLine}
+${signOffsLine}
+${styleNotesText}
+
+Match these patterns in your response.`.trim();
   }
 
   /**
