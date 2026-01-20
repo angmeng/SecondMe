@@ -4,7 +4,7 @@
  */
 
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth, Message: _Message } = pkg;
+const { Client, LocalAuth } = pkg;
 import { io } from '../index';
 import { redisClient } from '../redis/client';
 import path from 'path';
@@ -109,65 +109,10 @@ class WhatsAppClient {
       })).catch(err => console.error('[Gateway WhatsApp] Failed to publish status:', err));
     });
 
-    // Message received event
-    this.client.on('message', async (message: Message) => {
-      try {
-        await this.handleIncomingMessage(message);
-      } catch (error) {
-        console.error('[Gateway WhatsApp] Error handling message:', error);
-      }
-    });
-
     // Loading screen event
     this.client.on('loading_screen', (percent, message) => {
       console.log(`[Gateway WhatsApp] Loading: ${percent}% - ${message}`);
     });
-  }
-
-  private async handleIncomingMessage(message: Message): Promise<void> {
-    const contactId = message.from;
-    const content = message.body;
-    const fromMe = message.fromMe;
-    const timestamp = message.timestamp * 1000; // Convert to ms
-
-    console.log(`[Gateway WhatsApp] Message received from ${contactId}: ${fromMe ? '(from me)' : content.substring(0, 50)}`);
-
-    // If message is from the user (fromMe: true), trigger auto-pause
-    if (fromMe) {
-      console.log(`[Gateway WhatsApp] User message detected, triggering auto-pause for ${contactId}`);
-      await redisClient.setPause(contactId, 3600); // 60 minute pause
-      return;
-    }
-
-    // Check if bot is paused for this contact
-    const isPaused = await redisClient.isPaused(contactId);
-    if (isPaused) {
-      console.log(`[Gateway WhatsApp] Bot is paused for ${contactId}, skipping message`);
-      return;
-    }
-
-    // Publish message to Redis queue for orchestrator to process
-    const messagePayload = JSON.stringify({
-      messageId: message.id._serialized,
-      contactId,
-      content,
-      timestamp,
-      direction: 'incoming',
-      fromMe: false,
-    });
-
-    await redisClient.client.xadd('QUEUE:messages', '*', 'payload', messagePayload);
-    console.log(`[Gateway WhatsApp] Message queued for processing: ${message.id._serialized}`);
-
-    // Also publish to real-time events for dashboard
-    await redisClient.publish('events:messages', JSON.stringify({
-      messageId: message.id._serialized,
-      contactId,
-      content,
-      timestamp,
-      direction: 'incoming',
-      botSent: false,
-    }));
   }
 
   async initialize(): Promise<void> {

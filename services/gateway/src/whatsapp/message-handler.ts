@@ -49,6 +49,13 @@ export class MessageHandler {
     }
 
     const contactId = message.from;
+
+    // Ignore group chat messages - bot only operates in individual chats
+    if (contactId.endsWith('@g.us')) {
+      console.log(`[Gateway MessageHandler] Ignoring group message from ${contactId}`);
+      return;
+    }
+
     const content = message.body;
     const timestamp = message.timestamp * 1000; // Convert to milliseconds
 
