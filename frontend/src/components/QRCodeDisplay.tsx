@@ -16,7 +16,16 @@ interface QRCodeDisplayProps {
 export default function QRCodeDisplay({ qrCode, expiresIn = 60 }: QRCodeDisplayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeLeft, setTimeLeft] = useState(expiresIn);
-  const [isExpired, setIsExpired] = useState(false);
+  const [lastQrCode, setLastQrCode] = useState(qrCode);
+
+  // Derive isExpired from timeLeft instead of storing separately
+  const isExpired = timeLeft <= 0;
+
+  // Reset timer when QR code changes (using id tracking pattern)
+  if (lastQrCode !== qrCode) {
+    setLastQrCode(qrCode);
+    setTimeLeft(expiresIn);
+  }
 
   useEffect(() => {
     if (qrCode && canvasRef.current) {
@@ -40,16 +49,11 @@ export default function QRCodeDisplay({ qrCode, expiresIn = 60 }: QRCodeDisplayP
         }
       );
     }
-
-    // Reset timer when QR code changes
-    setTimeLeft(expiresIn);
-    setIsExpired(false);
-  }, [qrCode, expiresIn]);
+  }, [qrCode]);
 
   // Countdown timer
   useEffect(() => {
-    if (timeLeft <= 0) {
-      setIsExpired(true);
+    if (isExpired) {
       return;
     }
 
@@ -58,7 +62,7 @@ export default function QRCodeDisplay({ qrCode, expiresIn = 60 }: QRCodeDisplayP
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [isExpired]);
 
   if (!qrCode) {
     return null;

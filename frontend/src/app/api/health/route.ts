@@ -23,7 +23,6 @@ const startTime = Date.now();
 
 export async function GET(): Promise<NextResponse<HealthCheckResult>> {
   const checks: HealthCheckResult['checks'] = [];
-  const checkStart = Date.now();
 
   // Check Redis connectivity
   try {
@@ -34,7 +33,7 @@ export async function GET(): Promise<NextResponse<HealthCheckResult>> {
       status: 'pass',
       latencyMs: Date.now() - redisStart,
     });
-  } catch (error) {
+  } catch {
     checks.push({
       name: 'redis',
       status: 'fail',

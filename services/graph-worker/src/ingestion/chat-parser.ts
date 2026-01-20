@@ -223,7 +223,7 @@ function parseDateTime(dateStr: string, timeStr: string): Date | null {
     }
 
     return new Date(year, month, day, hours, minutes, seconds);
-  } catch (error) {
+  } catch {
     return null;
   }
 }

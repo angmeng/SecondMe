@@ -35,7 +35,7 @@ interface ConversationThreadProps {
 }
 
 export default function ConversationThread({
-  contactId,
+  contactId: _contactId,
   contactName,
   messages,
   isLoading = false,
@@ -356,6 +356,8 @@ export default function ConversationThread({
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
+          title="Scroll to bottom"
+          aria-label="Scroll to bottom"
           className="absolute bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg transition-all hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700"
         >
           <svg

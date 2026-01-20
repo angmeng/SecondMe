@@ -73,7 +73,9 @@ export default function Navigation() {
   const [isExpanded, setIsExpanded] = useState(false);
   const initialStatus = socketClient.getLastConnectionStatus();
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(initialStatus);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : false
+  );
   const prevStatusRef = useRef<ConnectionStatus>(initialStatus);
   const hoverTimeoutRef = useRef<NodeJS.Timeout>(null);
 
@@ -97,10 +99,9 @@ export default function Navigation() {
   useEffect(() => {
     // Check for dark mode preference
     const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDarkMode(darkModeMediaQuery.matches);
 
-    // Apply dark class to html element
-    if (darkModeMediaQuery.matches) {
+    // Apply dark class to html element based on initial state
+    if (isDarkMode) {
       document.documentElement.classList.add('dark');
     }
 

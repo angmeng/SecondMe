@@ -4,7 +4,7 @@
  */
 
 import pkg from 'whatsapp-web.js';
-const { Client } = pkg;
+const { Client: _Client } = pkg;
 
 export interface FetchedMessage {
   id: string;

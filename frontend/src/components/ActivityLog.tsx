@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { socketClient } from '@/lib/socket';
 import type {
   MessageReceivedEvent,
@@ -53,6 +53,13 @@ export default function ActivityLog({
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
   const [isPaused, setIsPaused] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const addEntry = useCallback((entry: ActivityLogEntry) => {
+    setEntries((prev) => {
+      const newEntries = [entry, ...prev].slice(0, maxEntries);
+      return newEntries;
+    });
+  }, [maxEntries]);
 
   useEffect(() => {
     const socket = socketClient.getSocket();
@@ -134,7 +141,7 @@ export default function ActivityLog({
       socket.off('error', handleError);
       socket.off('session_expiry_warning', handleSessionUpdate);
     };
-  }, []);
+  }, [addEntry]);
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -142,13 +149,6 @@ export default function ActivityLog({
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
   }, [entries, autoScroll, isPaused]);
-
-  function addEntry(entry: ActivityLogEntry) {
-    setEntries((prev) => {
-      const newEntries = [entry, ...prev].slice(0, maxEntries);
-      return newEntries;
-    });
-  }
 
   function getEntryIcon(type: ActivityLogEntry['type']) {
     switch (type) {
@@ -290,12 +290,10 @@ export default function ActivityLog({
 
   function formatTimestamp(timestamp: number): string {
     const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - timestamp;
+    const today = new Date();
+    const isToday = date.toDateString() === today.toDateString();
 
-    if (diff < 60000) return 'Just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (date.toDateString() === now.toDateString()) {
+    if (isToday) {
       return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     }
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

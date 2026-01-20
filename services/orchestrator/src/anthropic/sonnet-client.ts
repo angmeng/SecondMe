@@ -19,6 +19,40 @@ interface ContextualResponse {
   cacheWriteTokens: number;
 }
 
+/** Person/company context from knowledge graph */
+interface PersonContext {
+  personName?: string;
+  'p.name'?: string;
+  occupation?: string;
+  'p.occupation'?: string;
+  companyName?: string;
+  'comp.name'?: string;
+  industry?: string;
+  'comp.industry'?: string;
+}
+
+/** Topic context from knowledge graph */
+interface TopicContext {
+  topicName?: string;
+  't.name'?: string;
+  category?: string;
+  't.category'?: string;
+  times?: number;
+  'm.times'?: number;
+}
+
+/** Graph context containing people and topics */
+interface GraphContext {
+  people: PersonContext[];
+  topics: TopicContext[];
+}
+
+/** Usage type with cache token fields (beta feature) */
+type UsageWithCache = Anthropic.Messages.Usage & {
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
 class SonnetClient {
   private client: Anthropic;
 
@@ -34,7 +68,7 @@ class SonnetClient {
   async getContextualResponse(
     content: string,
     personaStyleGuide: string,
-    graphContext: { people: any[]; topics: any[] },
+    graphContext: GraphContext,
     styleProfile?: StyleProfile | null
   ): Promise<ContextualResponse> {
     try {
@@ -63,8 +97,9 @@ class SonnetClient {
         : '';
 
       const tokensUsed = response.usage.input_tokens + response.usage.output_tokens;
-      const cacheReadTokens = (response.usage as any).cache_read_input_tokens || 0;
-      const cacheWriteTokens = (response.usage as any).cache_creation_input_tokens || 0;
+      const usageWithCache = response.usage as UsageWithCache;
+      const cacheReadTokens = usageWithCache.cache_read_input_tokens || 0;
+      const cacheWriteTokens = usageWithCache.cache_creation_input_tokens || 0;
 
       console.log(`[Sonnet Client] Contextual response generated (${latency}ms, ${tokensUsed} tokens, cache read: ${cacheReadTokens}, cache write: ${cacheWriteTokens})`);
 
@@ -85,7 +120,7 @@ class SonnetClient {
    */
   private buildCachedSystemPrompt(
     personaStyleGuide: string,
-    graphContext: { people: any[]; topics: any[] },
+    graphContext: GraphContext,
     styleProfile?: StyleProfile | null
   ): Anthropic.Messages.TextBlockParam[] {
     // Format graph context as readable text
@@ -217,7 +252,7 @@ Match these patterns in your response.`.trim();
   /**
    * Format graph context into readable text
    */
-  private formatGraphContext(graphContext: { people: any[]; topics: any[] }): string {
+  private formatGraphContext(graphContext: GraphContext): string {
     const sections: string[] = [];
 
     // Format people and companies
@@ -247,7 +282,7 @@ Match these patterns in your response.`.trim();
         .map(t => {
           const name = t.topicName || t['t.name'];
           const category = t.category || t['t.category'];
-          const times = t.times || t['m.times'];
+          const times = t.times ?? t['m.times'] ?? 1;
           return `${name} (${category}) - mentioned ${times} time${times > 1 ? 's' : ''}`;
         })
         .join('\n- ');

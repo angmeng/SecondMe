@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { socketClient } from '@/lib/socket';
 import { getErrorMessage } from '@/lib/errors';
 
@@ -30,7 +30,63 @@ interface Props {
 export default function SessionExpiryCountdown({ className = '', compact = false }: Props) {
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
+
+  const loadSessionInfo = useCallback(async (retries = 2) => {
+    const fetchWithRetry = async (retriesLeft: number): Promise<void> => {
+      try {
+        const response = await fetch('/api/session');
+        if (response.ok) {
+          const data = await response.json();
+          // If state is UNKNOWN and we have retries, wait and try again
+          // Gateway's sessionManager may still be initializing
+          if (data.state === 'unknown' && retriesLeft > 0) {
+            console.log(`[SessionExpiry] State UNKNOWN, retrying (${retriesLeft} left)...`);
+            setTimeout(() => fetchWithRetry(retriesLeft - 1), 800);
+            return; // Don't set loading false yet
+          }
+          console.log('[SessionExpiry] Session info loaded:', data.state);
+          setSessionInfo(data);
+          setError(null);
+          setIsLoading(false);
+        } else if (retriesLeft > 0) {
+          // Retry after short delay
+          console.log(`[SessionExpiry] Request failed, retrying (${retriesLeft} left)...`);
+          setTimeout(() => fetchWithRetry(retriesLeft - 1), 800);
+          return; // Don't set loading false yet
+        } else {
+          // Set a default disconnected state on final failure
+          setSessionInfo({
+            isActive: false,
+            needsRefresh: false,
+            timeRemaining: { hours: 0, minutes: 0, isExpiring: false },
+            state: 'DISCONNECTED',
+            createdAt: null,
+            expiresAt: null,
+          });
+          setIsLoading(false);
+        }
+      } catch (err) {
+        if (retriesLeft > 0) {
+          console.log(`[SessionExpiry] Error, retrying (${retriesLeft} left)...`);
+          setTimeout(() => fetchWithRetry(retriesLeft - 1), 800);
+          return; // Don't set loading false yet
+        }
+        console.error('[SessionExpiry] Error loading session info:', getErrorMessage(err));
+        // Don't show error to user, just set disconnected state
+        setSessionInfo({
+          isActive: false,
+          needsRefresh: false,
+          timeRemaining: { hours: 0, minutes: 0, isExpiring: false },
+          state: 'DISCONNECTED',
+          createdAt: null,
+          expiresAt: null,
+        });
+        setIsLoading(false);
+      }
+    };
+    fetchWithRetry(retries);
+  }, []);
 
   useEffect(() => {
     // Check if WhatsApp was already connected before component mounted
@@ -57,7 +113,7 @@ export default function SessionExpiryCountdown({ className = '', compact = false
       console.log('[SessionExpiry] Expiry warning received:', data);
     };
 
-    const handleSessionExpired = (data: any) => {
+    const handleSessionExpired = (_data: any) => {
       setSessionInfo((prev) =>
         prev
           ? {
@@ -109,60 +165,7 @@ export default function SessionExpiryCountdown({ className = '', compact = false
       socketClient.offConnectionStatus(handleConnectionStatus);
       clearInterval(interval);
     };
-  }, []);
-
-  async function loadSessionInfo(retries = 2) {
-    try {
-      const response = await fetch('/api/session');
-      if (response.ok) {
-        const data = await response.json();
-        // If state is UNKNOWN and we have retries, wait and try again
-        // Gateway's sessionManager may still be initializing
-        if (data.state === 'unknown' && retries > 0) {
-          console.log(`[SessionExpiry] State UNKNOWN, retrying (${retries} left)...`);
-          setTimeout(() => loadSessionInfo(retries - 1), 800);
-          return; // Don't set loading false yet
-        }
-        console.log('[SessionExpiry] Session info loaded:', data.state);
-        setSessionInfo(data);
-        setError(null);
-        setIsLoading(false);
-      } else if (retries > 0) {
-        // Retry after short delay
-        console.log(`[SessionExpiry] Request failed, retrying (${retries} left)...`);
-        setTimeout(() => loadSessionInfo(retries - 1), 800);
-        return; // Don't set loading false yet
-      } else {
-        // Set a default disconnected state on final failure
-        setSessionInfo({
-          isActive: false,
-          needsRefresh: false,
-          timeRemaining: { hours: 0, minutes: 0, isExpiring: false },
-          state: 'DISCONNECTED',
-          createdAt: null,
-          expiresAt: null,
-        });
-        setIsLoading(false);
-      }
-    } catch (err) {
-      if (retries > 0) {
-        console.log(`[SessionExpiry] Error, retrying (${retries} left)...`);
-        setTimeout(() => loadSessionInfo(retries - 1), 800);
-        return; // Don't set loading false yet
-      }
-      console.error('[SessionExpiry] Error loading session info:', getErrorMessage(err));
-      // Don't show error to user, just set disconnected state
-      setSessionInfo({
-        isActive: false,
-        needsRefresh: false,
-        timeRemaining: { hours: 0, minutes: 0, isExpiring: false },
-        state: 'DISCONNECTED',
-        createdAt: null,
-        expiresAt: null,
-      });
-      setIsLoading(false);
-    }
-  }
+  }, [loadSessionInfo]);
 
   async function handleRefreshSession() {
     try {
@@ -209,7 +212,7 @@ export default function SessionExpiryCountdown({ className = '', compact = false
     return null;
   }
 
-  const { isActive, needsRefresh, timeRemaining, state } = sessionInfo;
+  const { isActive, needsRefresh, timeRemaining: _timeRemaining, state } = sessionInfo;
 
   // Compact view (for header/status bar)
   if (compact) {

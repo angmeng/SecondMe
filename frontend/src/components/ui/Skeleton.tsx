@@ -159,18 +159,29 @@ export function SkeletonBotStatus({ className = '' }: { className?: string }) {
 
 // Skeleton for conversation messages
 export function SkeletonConversation({ count = 6, className = '' }: { count?: number; className?: string }) {
+  // Use deterministic widths/heights based on index for consistent rendering
+  const getMessageDimensions = (index: number) => {
+    const widths = [180, 220, 160, 200, 140, 190];
+    const heights = [50, 60, 45, 70, 55, 65];
+    return {
+      width: widths[index % widths.length],
+      height: heights[index % heights.length],
+    };
+  };
+
   return (
     <div className={`space-y-4 ${className}`}>
       {Array.from({ length: count }).map((_, i) => {
         const isOutgoing = i % 2 === 1;
+        const dimensions = getMessageDimensions(i);
         return (
           <div key={i} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
             {!isOutgoing && <Skeleton variant="circular" width={32} height={32} className="mr-2" />}
             <div className={`max-w-[75%] ${isOutgoing ? 'text-right' : ''}`}>
               <Skeleton
                 variant="rounded"
-                width={Math.random() * 150 + 100}
-                height={Math.random() * 40 + 40}
+                width={dimensions.width}
+                height={dimensions.height}
               />
             </div>
           </div>

@@ -45,11 +45,11 @@ export const io = new Server(httpServer, {
 
 // Initialize handlers
 let authHandler: AuthHandler;
-let messageHandler: MessageHandler;
+let _messageHandler: MessageHandler;
 let messageSender: MessageSender;
 let sessionManager: SessionManager;
 let contactManager: ContactManager;
-let socketEmitter: SocketEventEmitter;
+let _socketEmitter: SocketEventEmitter;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -282,10 +282,10 @@ async function startGatewayService() {
     // Initialize handlers after WhatsApp client is ready
     const client = whatsappClient.getClient();
     authHandler = new AuthHandler(client);
-    messageHandler = new MessageHandler(client);
+    _messageHandler = new MessageHandler(client);
     messageSender = new MessageSender(client);
     sessionManager = new SessionManager(client);
-    socketEmitter = new SocketEventEmitter(io);
+    _socketEmitter = new SocketEventEmitter(io);
 
     // Initialize session tracking when WhatsApp is ready
     client.on('ready', async () => {

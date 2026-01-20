@@ -10,7 +10,7 @@ import { getErrorMessage } from '@/lib/errors';
 /**
  * GET /api/metrics - Get current system metrics
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const dateKey = new Date().toISOString().split('T')[0];
     const statsKey = `STATS:tokens:${dateKey}`;

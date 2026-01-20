@@ -220,7 +220,7 @@ class RedisClient {
 
     const responses: Array<{ id: string; payload: any }> = [];
 
-    for (const [streamName, entries] of results) {
+    for (const [_streamName, entries] of results) {
       for (const [id, fieldArray] of entries) {
         // fieldArray is ['payload', '{...}']
         const payloadJson = fieldArray[1];

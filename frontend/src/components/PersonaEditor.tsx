@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 interface Persona {
   id: string;
@@ -44,32 +44,28 @@ export default function PersonaEditor({
   const [exampleMessages, setExampleMessages] = useState(persona.exampleMessages);
   const [applicableTo, setApplicableTo] = useState(persona.applicableTo);
   const [newExample, setNewExample] = useState('');
-  const [hasChanges, setHasChanges] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [personaId, setPersonaId] = useState(persona.id);
 
   const isDefaultPersona = DEFAULT_PERSONA_IDS.includes(persona.id);
 
-  // Reset form when persona changes
-  useEffect(() => {
+  // Reset form when persona changes (using id tracking to avoid setState in effect)
+  if (personaId !== persona.id) {
+    setPersonaId(persona.id);
     setName(persona.name);
     setStyleGuide(persona.styleGuide);
     setTone(persona.tone);
     setExampleMessages(persona.exampleMessages);
     setApplicableTo(persona.applicableTo);
-    setHasChanges(false);
-  }, [persona]);
+  }
 
-  // Track changes
-  useEffect(() => {
-    const changed =
-      name !== persona.name ||
-      styleGuide !== persona.styleGuide ||
-      tone !== persona.tone ||
-      JSON.stringify(exampleMessages) !== JSON.stringify(persona.exampleMessages) ||
-      JSON.stringify(applicableTo) !== JSON.stringify(persona.applicableTo);
-
-    setHasChanges(changed);
-  }, [name, styleGuide, tone, exampleMessages, applicableTo, persona]);
+  // Compute hasChanges during render instead of storing in state
+  const hasChanges =
+    name !== persona.name ||
+    styleGuide !== persona.styleGuide ||
+    tone !== persona.tone ||
+    JSON.stringify(exampleMessages) !== JSON.stringify(persona.exampleMessages) ||
+    JSON.stringify(applicableTo) !== JSON.stringify(persona.applicableTo);
 
   function handleAddExample() {
     if (newExample.trim()) {
@@ -323,6 +319,8 @@ export default function PersonaEditor({
                   </div>
                   <button
                     onClick={() => handleRemoveExample(index)}
+                    title="Remove example"
+                    aria-label="Remove example"
                     className="flex-shrink-0 rounded p-1 text-slate-400 transition-colors hover:bg-slate-200 hover:text-error-500 dark:hover:bg-slate-700"
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
