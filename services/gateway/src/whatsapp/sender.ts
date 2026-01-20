@@ -96,7 +96,12 @@ export class MessageSender {
       }
 
       // Send the message
-      const message = await this.client.sendMessage(contactId, content);
+      // Disable sendSeen for group chats to avoid whatsapp-web.js bug
+      // where sendSeen fails with "Cannot read properties of undefined (reading 'markedUnread')"
+      const isGroupChat = contactId.endsWith('@g.us');
+      const message = await this.client.sendMessage(contactId, content, {
+        sendSeen: !isGroupChat,
+      });
 
       // Stop typing indicator
       if (simulateTyping) {
@@ -217,8 +222,11 @@ export class MessageSender {
       await this.sleep(typingDelay);
 
       // Send media
+      // Disable sendSeen for group chats to avoid whatsapp-web.js bug
+      const isGroupChat = contactId.endsWith('@g.us');
       const message = await this.client.sendMessage(contactId, media, {
         caption,
+        sendSeen: !isGroupChat,
       });
 
       await this.stopTyping(contactId);

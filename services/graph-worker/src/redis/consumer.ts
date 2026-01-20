@@ -1,6 +1,7 @@
 /**
  * Redis Consumer - Chat History Queue Consumer
  * User Story 2: Consumes chat messages for entity extraction and graph building
+ * Per-Contact Style Profiling: Analyzes outgoing messages for style patterns
  */
 
 import { redisClient } from './client.js';
@@ -9,6 +10,7 @@ import { extractEntities, deduplicateEntities } from '../ingestion/entity-extrac
 import { buildGraphFromEntities } from '../ingestion/graph-builder.js';
 import { recordProcessedMessage, updateContactLastInteraction, updateContactRelationshipType } from '../falkordb/mutations.js';
 import { RelationshipAnalyzer, RelationshipType, RelationshipSignal } from '../analysis/relationship-analyzer.js';
+import { StyleAnalyzer } from '../analysis/style-analyzer.js';
 
 const SERVICE_NAME = 'Graph Worker Consumer';
 const REAL_TIME_QUEUE = 'QUEUE:messages_for_extraction';
@@ -61,11 +63,22 @@ class RedisConsumer {
   private extractionBatches: Map<string, ExtractionBatch> = new Map();
   private isRunning: boolean = false;
   private relationshipAnalyzer: RelationshipAnalyzer | null = null;
+  private styleAnalyzer: StyleAnalyzer | null = null;
   private signalBatches: Map<string, Array<{ signal: RelationshipSignal; timestamp: number }>> = new Map();
   private lastSignalFlush: number = Date.now();
 
   constructor(config: Partial<ConsumerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Get or create the StyleAnalyzer instance
+   */
+  private getStyleAnalyzer(): StyleAnalyzer {
+    if (!this.styleAnalyzer) {
+      this.styleAnalyzer = new StyleAnalyzer(redisClient.client);
+    }
+    return this.styleAnalyzer;
   }
 
   /**
@@ -350,7 +363,7 @@ class RedisConsumer {
    * Process a real-time message for extraction
    */
   private async processRealTimeMessage(message: QueueMessage): Promise<void> {
-    const { contactId, contactName, content, sender } = message.fields;
+    const { contactId, contactName, content, sender, fromMe } = message.fields;
 
     // Type guards for required fields
     if (!contactId || !content) {
@@ -359,6 +372,18 @@ class RedisConsumer {
     }
 
     const timestamp = parseInt(message.fields['timestamp'] || Date.now().toString(), 10);
+
+    // Analyze outgoing messages for style profiling
+    // Check both 'fromMe' field and 'sender === me' for compatibility
+    const isOutgoing = fromMe === 'true' || sender === 'me';
+    if (isOutgoing) {
+      try {
+        await this.getStyleAnalyzer().analyzeOutgoingMessage(contactId, content);
+      } catch (error) {
+        console.error(`[${SERVICE_NAME}] Style analysis error for ${contactId}:`, error);
+        // Don't fail message processing if style analysis fails
+      }
+    }
 
     await this.addToBatch(contactId, contactName || 'Unknown', {
       content,

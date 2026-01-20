@@ -5,7 +5,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { ContactContext, PersonaContext } from '../falkordb/queries.js';
+import { ContactContext, PersonaContext, StyleProfile } from '../falkordb/queries.js';
 
 /**
  * Build cached system prompt for Sonnet with persona and graph context
@@ -14,10 +14,12 @@ import { ContactContext, PersonaContext } from '../falkordb/queries.js';
 export function buildContextualSystemPrompt(
   persona: PersonaContext,
   context: ContactContext,
-  contactName: string
+  contactName: string,
+  styleProfile?: StyleProfile | null
 ): Anthropic.Messages.MessageCreateParams['system'] {
   const contextText = formatGraphContext(context, contactName);
   const examplesText = formatExampleMessages(persona.exampleMessages);
+  const styleText = styleProfile ? formatStyleProfileForPrompt(styleProfile) : null;
 
   return [
     {
@@ -54,6 +56,16 @@ ${contextText}
 Use this context naturally in your response when relevant. Don't force it if it doesn't fit the conversation.`,
       cache_control: { type: 'ephemeral' }, // Cache graph context
     },
+    // Style profile block (only if available with sufficient samples)
+    ...(styleText
+      ? [
+          {
+            type: 'text' as const,
+            text: styleText,
+            cache_control: { type: 'ephemeral' as const }, // Cache style profile
+          },
+        ]
+      : []),
     {
       type: 'text',
       text: `RESPONSE GUIDELINES:
@@ -155,6 +167,79 @@ function formatExampleMessages(examples: string[]): string {
 
   const examplesText = examples.map((ex, i) => `  ${i + 1}. "${ex}"`).join('\n');
   return `EXAMPLE MESSAGES (match this style):\n${examplesText}`;
+}
+
+/**
+ * Format style profile for the prompt
+ * Only included when profile has sufficient samples (>= 10 messages analyzed)
+ */
+function formatStyleProfileForPrompt(profile: StyleProfile): string | null {
+  // Require minimum samples for reliable style inference
+  if (profile.sampleCount < 10) {
+    return null;
+  }
+
+  // Describe message length
+  const lengthDesc =
+    profile.avgMessageLength < 50
+      ? 'brief'
+      : profile.avgMessageLength < 100
+        ? 'moderate'
+        : 'detailed';
+
+  // Describe emoji usage
+  const emojiDesc =
+    profile.emojiFrequency < 0.2
+      ? 'rarely use emojis'
+      : profile.emojiFrequency < 0.8
+        ? 'occasionally use emojis'
+        : 'frequently use emojis';
+
+  // Describe formality
+  const formalityDesc =
+    profile.formalityScore < 0.3
+      ? 'casual'
+      : profile.formalityScore < 0.7
+        ? 'semi-formal'
+        : 'formal';
+
+  // Build style notes from punctuation and patterns
+  const styleNotes: string[] = [];
+
+  if (profile.punctuationStyle?.usesEllipsis) {
+    styleNotes.push('You often use ellipsis (...)');
+  }
+  if (profile.punctuationStyle?.exclamationFrequency > 0.3) {
+    styleNotes.push('You frequently use exclamation marks!');
+  }
+  if (profile.punctuationStyle?.endsWithPeriod === false) {
+    styleNotes.push('You often skip ending periods');
+  }
+
+  // Format greetings if available
+  const greetingsLine =
+    profile.greetingStyle && profile.greetingStyle.length > 0
+      ? `- Common greetings you use: "${profile.greetingStyle.slice(0, 3).join('", "')}"`
+      : '';
+
+  // Format sign-offs if available
+  const signOffsLine =
+    profile.signOffStyle && profile.signOffStyle.length > 0
+      ? `- Common sign-offs you use: "${profile.signOffStyle.slice(0, 3).join('", "')}"`
+      : '';
+
+  const styleNotesText = styleNotes.map((note) => `- ${note}`).join('\n');
+
+  return `YOUR MESSAGING STYLE WITH THIS CONTACT:
+Based on ${profile.sampleCount} of your previous messages to this person:
+- Message length: ${lengthDesc} (~${Math.round(profile.avgMessageLength)} characters)
+- Emoji usage: ${emojiDesc}
+- Tone: ${formalityDesc}
+${greetingsLine}
+${signOffsLine}
+${styleNotesText}
+
+Match these patterns in your response.`.trim();
 }
 
 /**

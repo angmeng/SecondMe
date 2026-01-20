@@ -387,3 +387,96 @@ export async function updatePersona(
     return false;
   }
 }
+
+/**
+ * Punctuation style characteristics
+ */
+export interface PunctuationStyle {
+  usesEllipsis: boolean;
+  exclamationFrequency: number;
+  questionFrequency: number;
+  endsWithPeriod: boolean;
+}
+
+/**
+ * Per-contact communication style profile
+ */
+export interface StyleProfile {
+  contactId: string;
+  avgMessageLength: number;
+  emojiFrequency: number;
+  formalityScore: number;
+  punctuationStyle: PunctuationStyle;
+  greetingStyle: string[];
+  signOffStyle: string[];
+  sampleCount: number;
+  lastUpdated: number;
+}
+
+/**
+ * Get contact's style profile from graph
+ * Returns null if contact has no style data or insufficient samples
+ */
+export async function getContactStyleProfile(contactId: string): Promise<StyleProfile | null> {
+  const query = `
+    MATCH (c:Contact {id: $contactId})
+    WHERE c.styleSampleCount IS NOT NULL AND c.styleSampleCount >= 10
+    RETURN c.styleAvgLength AS avgMessageLength,
+           c.styleEmojiFreq AS emojiFrequency,
+           c.styleFormalityScore AS formalityScore,
+           c.stylePunctuationData AS punctuationData,
+           c.styleGreetings AS greetings,
+           c.styleSignOffs AS signOffs,
+           c.styleSampleCount AS sampleCount,
+           c.styleUpdatedAt AS lastUpdated
+  `;
+
+  try {
+    const results = await falkordbClient.query(query, { contactId });
+
+    if (results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+
+    // Parse JSON fields
+    let punctuationStyle: PunctuationStyle = {
+      usesEllipsis: false,
+      exclamationFrequency: 0,
+      questionFrequency: 0,
+      endsWithPeriod: false,
+    };
+    let greetingStyle: string[] = [];
+    let signOffStyle: string[] = [];
+
+    try {
+      if (row.punctuationData) {
+        punctuationStyle = JSON.parse(row.punctuationData);
+      }
+      if (row.greetings) {
+        greetingStyle = JSON.parse(row.greetings);
+      }
+      if (row.signOffs) {
+        signOffStyle = JSON.parse(row.signOffs);
+      }
+    } catch (parseError) {
+      console.warn('[FalkorDB Queries] Error parsing style profile JSON:', parseError);
+    }
+
+    return {
+      contactId,
+      avgMessageLength: row.avgMessageLength || 0,
+      emojiFrequency: row.emojiFrequency || 0,
+      formalityScore: row.formalityScore || 0.5,
+      punctuationStyle,
+      greetingStyle,
+      signOffStyle,
+      sampleCount: row.sampleCount || 0,
+      lastUpdated: row.lastUpdated || Date.now(),
+    };
+  } catch (error) {
+    console.error('[FalkorDB Queries] Error getting style profile:', error);
+    return null;
+  }
+}
