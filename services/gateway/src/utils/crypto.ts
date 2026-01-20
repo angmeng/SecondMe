@@ -134,7 +134,7 @@ export function isEncryptionConfigured(): boolean {
 /**
  * Hash a value for non-reversible storage (e.g., contact IDs in logs)
  */
-export function hashForLogging(value: string): string {
+export function hashForLogging(_value: string): string {
   const hash = randomBytes(16);
   return `hash:${hash.toString('hex').substring(0, 8)}`;
 }

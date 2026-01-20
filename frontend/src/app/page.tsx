@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { socketClient } from '@/lib/socket';
 import KillSwitch from '@/components/KillSwitch';
 import SessionExpiryCountdown from '@/components/SessionExpiryCountdown';
@@ -28,12 +28,15 @@ export default function HomePage() {
     () => socketClient.getLastConnectionStatus()
   );
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
-  const [isSocketConnected, setIsSocketConnected] = useState(false);
+  const [isSocketConnected, setIsSocketConnected] = useState(() => socketClient.getSocket().connected);
   const [activeFilter, setActiveFilter] = useState<'all' | 'messages' | 'pauses'>('all');
+
+  const addActivity = useCallback((activity: RecentActivity) => {
+    setRecentActivity((prev) => [activity, ...prev].slice(0, 20));
+  }, []);
 
   useEffect(() => {
     const socket = socketClient.getSocket();
-    setIsSocketConnected(socket.connected);
 
     // Keep isSocketConnected in sync with actual socket state
     const handleSocketConnect = () => {
@@ -93,11 +96,7 @@ export default function HomePage() {
       socketClient.offMessageStatus(handleMessageStatus);
       socketClient.offPauseUpdate(handlePauseUpdate);
     };
-  }, []);
-
-  function addActivity(activity: RecentActivity) {
-    setRecentActivity((prev) => [activity, ...prev].slice(0, 20));
-  }
+  }, [addActivity]);
 
   function getStatusConfig(status: ConnectionStatus) {
     switch (status) {
@@ -133,15 +132,14 @@ export default function HomePage() {
   }
 
   function formatRelativeTime(timestamp: number): string {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
+    const date = new Date(timestamp);
+    const today = new Date();
+    const isToday = date.toDateString() === today.toDateString();
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return new Date(timestamp).toLocaleDateString();
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   const filteredActivity = recentActivity.filter((activity) => {

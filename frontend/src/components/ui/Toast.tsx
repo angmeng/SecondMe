@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export type ToastVariant = 'success' | 'error' | 'warning' | 'info';
 
@@ -69,6 +69,13 @@ export default function Toast({
 }: ToastProps) {
   const [isExiting, setIsExiting] = useState(false);
 
+  const handleDismiss = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      onDismiss(id);
+    }, 200);
+  }, [id, onDismiss]);
+
   useEffect(() => {
     if (duration === 0) return;
 
@@ -77,14 +84,7 @@ export default function Toast({
     }, duration);
 
     return () => clearTimeout(timer);
-  }, [duration, id]);
-
-  function handleDismiss() {
-    setIsExiting(true);
-    setTimeout(() => {
-      onDismiss(id);
-    }, 200);
-  }
+  }, [duration, handleDismiss]);
 
   function handleAction() {
     action?.onClick();

@@ -4,7 +4,7 @@
  */
 
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth, Message } = pkg;
+const { Client, LocalAuth, Message: _Message } = pkg;
 import { io } from '../index';
 import { redisClient } from '../redis/client';
 import path from 'path';
