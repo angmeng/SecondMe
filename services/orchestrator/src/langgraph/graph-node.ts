@@ -1,6 +1,6 @@
 /**
  * Graph Query Node - Knowledge Graph Context Retrieval
- * User Story 2: Retrieves relevant context from FalkorDB for substantive messages
+ * User Story 2: Retrieves relevant context from AutoMem for substantive messages
  */
 
 import { WorkflowState } from './workflow.js';
@@ -11,8 +11,8 @@ import {
   getDefaultPersona,
   getPersonaById,
   getContactStyleProfile,
-  PersonaContext,
-} from '../falkordb/queries.js';
+  type PersonaContext,
+} from '../automem/recall.js';
 import { personaCache } from '../redis/persona-cache.js';
 import { getStyleProfileWithCache } from '../redis/style-cache.js';
 import { retrieveContext, isSemanticRagEnabled } from '../retrieval/index.js';
@@ -21,7 +21,7 @@ import { retrieveContext, isSemanticRagEnabled } from '../retrieval/index.js';
 const DEFAULT_USER_ID = 'user-1';
 
 /**
- * Graph query node - retrieves context from FalkorDB
+ * Graph query node - retrieves context from AutoMem
  * Only called for substantive messages that need context
  */
 export async function graphQueryNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
@@ -68,7 +68,7 @@ export async function graphQueryNode(state: WorkflowState): Promise<Partial<Work
 
 /**
  * Persona retrieval node - gets persona based on relationship type
- * Checks Redis cache first, then falls back to FalkorDB
+ * Checks Redis cache first, then falls back to AutoMem
  */
 export async function personaNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Persona Node] Getting persona for relationship type: ${state.relationshipType || 'unknown'}...`);
@@ -90,7 +90,7 @@ export async function personaNode(state: WorkflowState): Promise<Partial<Workflo
         };
       }
 
-      // Query FalkorDB for assigned persona by ID
+      // Query AutoMem for assigned persona by ID
       const assignedPersona = await getPersonaById(assignedPersonaId);
       if (assignedPersona) {
         // Cache the assigned persona
@@ -120,7 +120,7 @@ export async function personaNode(state: WorkflowState): Promise<Partial<Workflo
       };
     }
 
-    // Query FalkorDB for persona
+    // Query AutoMem for persona
     let persona = await getPersonaForContact(DEFAULT_USER_ID, relationshipType);
 
     if (!persona) {
@@ -183,7 +183,7 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
 
     // Determine relationship type:
     // 1. High-confidence signal from router (real-time detection) takes precedence for THIS request
-    // 2. Fall back to stored relationship type from FalkorDB
+    // 2. Fall back to stored relationship type from AutoMem
     // 3. Default to 'acquaintance' if nothing found
     let relationshipType = contactInfo?.relationshipType || 'acquaintance';
 
@@ -266,7 +266,7 @@ async function getPersonaWithCache(
       return { persona: cached, cached: true };
     }
 
-    // Query FalkorDB for assigned persona by ID
+    // Query AutoMem for assigned persona by ID
     const assignedPersona = await getPersonaById(assignedPersonaId);
     if (assignedPersona) {
       // Cache the assigned persona
@@ -275,7 +275,7 @@ async function getPersonaWithCache(
       return { persona: assignedPersona, cached: false };
     }
 
-    // Assigned persona not found in DB - log warning and fall back to relationship-based
+    // Assigned persona not found in AutoMem - log warning and fall back to relationship-based
     console.warn(
       `[Persona Cache] Assigned persona ${assignedPersonaId} not found in DB, falling back to relationship-based selection`
     );
@@ -289,7 +289,7 @@ async function getPersonaWithCache(
     return { persona: cached, cached: true };
   }
 
-  // Query FalkorDB for relationship-based persona
+  // Query AutoMem for relationship-based persona
   let persona = await getPersonaForContact(DEFAULT_USER_ID, relationshipType);
 
   if (!persona) {

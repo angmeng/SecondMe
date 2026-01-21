@@ -1,10 +1,10 @@
 /**
  * Style Cache - Redis-based caching for contact style profiles
- * Per-Contact Style Profiling: Reduces FalkorDB queries by caching style data
+ * Per-Contact Style Profiling: Reduces AutoMem queries by caching style data
  */
 
 import { redisClient } from './client.js';
-import { StyleProfile } from '../falkordb/queries.js';
+import { type StyleProfile } from '../automem/recall.js';
 
 const CACHE_PREFIX = 'CACHE:style:';
 const DEFAULT_TTL_SECONDS = 1800; // 30 minutes
@@ -76,7 +76,7 @@ class StyleCache {
 export const styleCache = new StyleCache();
 
 /**
- * Get style profile from cache or load from FalkorDB
+ * Get style profile from cache or load from AutoMem
  * Helper function for common cache-first pattern
  */
 export async function getStyleProfileWithCache(

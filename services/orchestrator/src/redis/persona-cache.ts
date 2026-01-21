@@ -1,10 +1,10 @@
 /**
  * Persona Cache - Redis-based caching for persona data
- * User Story 2: Reduces FalkorDB queries by caching persona style guides
+ * User Story 2: Reduces AutoMem queries by caching persona style guides
  */
 
 import { redisClient } from './client.js';
-import { PersonaContext } from '../falkordb/queries.js';
+import { type PersonaContext } from '../automem/recall.js';
 
 const CACHE_PREFIX = 'CACHE:persona:';
 const DEFAULT_TTL_SECONDS = 1800; // 30 minutes
@@ -103,7 +103,7 @@ class PersonaCache {
 export const personaCache = new PersonaCache();
 
 /**
- * Get persona from cache or load from FalkorDB
+ * Get persona from cache or load from AutoMem
  * Helper function for common cache-first pattern
  */
 export async function getPersonaWithCache(

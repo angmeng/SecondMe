@@ -4,7 +4,7 @@
  *
  * Follows the same pattern as RelationshipAnalyzer:
  * - Accumulates signals in Redis (fast, real-time)
- * - Updates FalkorDB when conditions are met (batch, durable)
+ * - Updates AutoMem when conditions are met (batch, durable)
  */
 
 import { Redis } from 'ioredis';
@@ -22,7 +22,7 @@ import {
   serializeAccumulatedData,
   deserializeAccumulatedData,
 } from './style-profile.js';
-import { updateContactStyleProfile } from '../falkordb/mutations.js';
+import { updateStyleProfile } from '../automem/index.js';
 
 // Redis key prefix for style data
 const STYLE_DATA_KEY_PREFIX = 'STYLE:data:';
@@ -115,12 +115,12 @@ export class StyleAnalyzer {
     // Increment pending count
     await this.redis.incr(this.getPendingKey(contactId));
 
-    // Check if we should update FalkorDB
+    // Check if we should update AutoMem
     await this.maybeUpdateProfile(contactId, data);
   }
 
   /**
-   * Check if profile should be updated in FalkorDB
+   * Check if profile should be updated in AutoMem
    */
   private async maybeUpdateProfile(
     contactId: string,
@@ -140,14 +140,14 @@ export class StyleAnalyzer {
       return;
     }
 
-    console.log(`[Style Analyzer] Updating FalkorDB profile for ${contactId} (${pendingCount} pending changes)`);
+    console.log(`[Style Analyzer] Updating AutoMem profile for ${contactId} (${pendingCount} pending changes)`);
 
     // Compute profile
     const profile = computeStyleProfile(contactId, data);
 
-    // Update FalkorDB
+    // Update AutoMem
     try {
-      await updateContactStyleProfile(contactId, profile);
+      await updateStyleProfile(contactId, profile);
 
       // Reset pending count
       await this.redis.del(this.getPendingKey(contactId));
@@ -207,7 +207,7 @@ export class StyleAnalyzer {
   }
 
   /**
-   * Force update profile to FalkorDB (for manual triggers)
+   * Force update profile to AutoMem (for manual triggers)
    */
   async forceUpdateProfile(contactId: string): Promise<StyleProfile | null> {
     const data = await this.getAccumulatedData(contactId);
@@ -218,7 +218,7 @@ export class StyleAnalyzer {
     }
 
     const profile = computeStyleProfile(contactId, data);
-    await updateContactStyleProfile(contactId, profile);
+    await updateStyleProfile(contactId, profile);
     await this.redis.del(this.getPendingKey(contactId));
 
     return profile;

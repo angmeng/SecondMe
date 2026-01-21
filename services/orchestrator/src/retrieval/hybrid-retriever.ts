@@ -2,28 +2,19 @@
  * Hybrid Retriever for Semantic RAG
  * Combines semantic vector search with keyword fallback
  * Provides graceful degradation when semantic search is unavailable
+ *
+ * Uses AutoMem for both semantic search (via Qdrant) and graph retrieval
  */
 
-import { embedMessage, isVoyageConfigured } from '../embeddings/index.js';
-import {
-  searchRelevantTopics,
-  searchRelevantPeople,
-  searchRelevantEvents,
-  checkVectorIndexesExist,
-} from './semantic-queries.js';
-import {
-  rerankAndSelect,
-  mergeRankedResults,
-  logRetrievalStats,
-  RankedResult,
-} from './reranker.js';
 import {
   getContactContext,
-  ContactContext,
-  PersonContext,
-  TopicContext,
-  EventContext,
-} from '../falkordb/queries.js';
+  searchRelevantContext,
+  type ContactContext,
+  type PersonContext,
+  type TopicContext,
+  type EventContext,
+} from '../automem/recall.js';
+import { automemClient } from '../automem/client.js';
 
 /**
  * Semantic RAG configuration
@@ -75,13 +66,14 @@ export interface SemanticRetrievalResult {
   };
 }
 
-// Cache for vector index availability check
-let vectorIndexesAvailable: boolean | null = null;
-let vectorIndexCheckTime = 0;
-const VECTOR_INDEX_CHECK_TTL = 60000; // 1 minute
+// Cache for AutoMem availability check
+let automemAvailableCache: boolean | null = null;
+let automemCheckTime = 0;
+const AUTOMEM_CHECK_TTL = 60000; // 1 minute
 
 /**
  * Check if semantic retrieval is available
+ * Uses AutoMem's internal Qdrant for vector search
  */
 async function isSemanticAvailable(): Promise<boolean> {
   // Check feature flag
@@ -89,66 +81,19 @@ async function isSemanticAvailable(): Promise<boolean> {
     return false;
   }
 
-  // Check Voyage API configuration
-  if (!isVoyageConfigured()) {
-    console.warn('[Hybrid Retriever] Voyage API not configured');
-    return false;
-  }
-
-  // Check vector indexes (with caching)
+  // Check AutoMem availability (with caching)
   const now = Date.now();
-  if (vectorIndexesAvailable === null || now - vectorIndexCheckTime > VECTOR_INDEX_CHECK_TTL) {
-    vectorIndexesAvailable = await checkVectorIndexesExist();
-    vectorIndexCheckTime = now;
+  if (automemAvailableCache === null || now - automemCheckTime > AUTOMEM_CHECK_TTL) {
+    automemAvailableCache = automemClient.connected;
+    automemCheckTime = now;
   }
 
-  return vectorIndexesAvailable;
+  return automemAvailableCache;
 }
 
 /**
- * Convert ranked results to PersonContext format
- */
-function rankedToPeopleContext(ranked: RankedResult[]): PersonContext[] {
-  return ranked.map((r) => {
-    const person: PersonContext = { name: r.name };
-    if (r.occupation) person.occupation = r.occupation;
-    if (r.company) person.company = r.company;
-    if (r.industry) person.industry = r.industry;
-    if (r.notes) person.notes = r.notes;
-    if (r.lastMentioned) person.lastMentioned = r.lastMentioned;
-    return person;
-  });
-}
-
-/**
- * Convert ranked results to TopicContext format
- */
-function rankedToTopicContext(ranked: RankedResult[]): TopicContext[] {
-  return ranked.map((r) => {
-    const topic: TopicContext = {
-      name: r.name,
-      times: r.times || 1,
-      lastMentioned: r.lastMentioned || Date.now(),
-    };
-    if (r.category) topic.category = r.category;
-    return topic;
-  });
-}
-
-/**
- * Convert ranked results to EventContext format
- */
-function rankedToEventContext(ranked: RankedResult[]): EventContext[] {
-  return ranked.map((r) => {
-    const event: EventContext = { name: r.name };
-    if (r.date) event.date = r.date;
-    if (r.description) event.description = r.description;
-    return event;
-  });
-}
-
-/**
- * Perform semantic retrieval with vector search
+ * Perform semantic retrieval using AutoMem
+ * AutoMem handles vector search via Qdrant internally
  */
 async function semanticRetrieval(
   message: string,
@@ -158,73 +103,72 @@ async function semanticRetrieval(
   context: ContactContext;
   stats: SemanticRetrievalResult['stats'];
 }> {
-  // Step 1: Embed the message
-  const embeddingResult = await embedMessage(message);
-  const queryEmbedding = embeddingResult.embedding;
+  // Use AutoMem's semantic search - it handles embedding and vector search internally
+  const totalLimit =
+    config.retrieval.topK.topics + config.retrieval.topK.people + config.retrieval.topK.events;
 
-  // Step 2: Run parallel vector searches
-  const [topicResults, peopleResults, eventResults] = await Promise.all([
-    searchRelevantTopics(queryEmbedding, contactId, {
-      topK: config.retrieval.topK.topics,
-      minScore: config.retrieval.minScore.topics,
-    }),
-    searchRelevantPeople(queryEmbedding, contactId, {
-      topK: config.retrieval.topK.people,
-      minScore: config.retrieval.minScore.people,
-    }),
-    searchRelevantEvents(queryEmbedding, contactId, {
-      topK: config.retrieval.topK.events,
-      minScore: config.retrieval.minScore.events,
-    }),
-  ]);
+  const response = await searchRelevantContext(message, contactId, totalLimit);
 
-  // Step 3: Rerank results
-  const rankedTopics = rerankAndSelect(topicResults, 'Topic', {
-    maxResults: config.reranking.maxResults,
-    minScore: config.reranking.minScore,
-    scoreDrop: config.reranking.scoreDrop,
-  });
+  // Parse results into categorized context
+  const people: PersonContext[] = [];
+  const topics: TopicContext[] = [];
+  const events: EventContext[] = [];
 
-  const rankedPeople = rerankAndSelect(peopleResults, 'Person', {
-    maxResults: config.reranking.maxResults,
-    minScore: config.reranking.minScore,
-    scoreDrop: config.reranking.scoreDrop,
-  });
+  for (const result of response.results) {
+    try {
+      const parsed = JSON.parse(result.memory.content) as Record<string, unknown>;
+      const entityType = result.memory.metadata?.['entityType'] as string | undefined;
 
-  const rankedEvents = rerankAndSelect(eventResults, 'Event', {
-    maxResults: config.reranking.maxResults,
-    minScore: config.reranking.minScore,
-    scoreDrop: config.reranking.scoreDrop,
-  });
+      if (entityType === 'person') {
+        const person: PersonContext = { name: parsed['name'] as string };
+        if (parsed['occupation']) person.occupation = parsed['occupation'] as string;
+        if (parsed['company']) person.company = parsed['company'] as string;
+        if (parsed['industry']) person.industry = parsed['industry'] as string;
+        if (parsed['notes']) person.notes = parsed['notes'] as string;
+        if (result.memory.timestamp) {
+          person.lastMentioned = new Date(result.memory.timestamp).getTime();
+        }
+        people.push(person);
+      } else if (entityType === 'topic') {
+        const topic: TopicContext = {
+          name: parsed['name'] as string,
+          times: (parsed['mentionCount'] as number) || 1,
+          lastMentioned: (parsed['lastMentioned'] as number) || Date.now(),
+        };
+        if (parsed['category']) topic.category = parsed['category'] as string;
+        topics.push(topic);
+      } else if (entityType === 'event') {
+        const event: EventContext = { name: parsed['name'] as string };
+        if (parsed['date']) event.date = parsed['date'] as string;
+        if (parsed['description']) event.description = parsed['description'] as string;
+        events.push(event);
+      }
+    } catch {
+      // Skip malformed results
+      console.warn(`[Hybrid Retriever] Failed to parse memory: ${result.id}`);
+    }
+  }
 
   // Log retrieval stats
-  const allRanked = mergeRankedResults(rankedTopics, rankedPeople, rankedEvents);
-  logRetrievalStats(
-    message.length,
-    topicResults.length,
-    peopleResults.length,
-    eventResults.length,
-    rankedTopics.length,
-    rankedPeople.length,
-    rankedEvents.length,
-    allRanked
+  console.log(
+    `[Hybrid Retriever] AutoMem semantic search returned ${response.results.length} results: ` +
+      `${people.length} people, ${topics.length} topics, ${events.length} events`
   );
 
-  // Step 4: Convert to ContactContext format
   const context: ContactContext = {
-    people: rankedToPeopleContext(rankedPeople),
-    topics: rankedToTopicContext(rankedTopics),
-    events: rankedToEventContext(rankedEvents),
+    people: people.slice(0, config.retrieval.topK.people),
+    topics: topics.slice(0, config.retrieval.topK.topics),
+    events: events.slice(0, config.retrieval.topK.events),
   };
 
   return {
     context,
     stats: {
-      embeddingCached: embeddingResult.fromCache,
-      topicCandidates: topicResults.length,
-      peopleCandidates: peopleResults.length,
-      eventCandidates: eventResults.length,
-      tokensUsed: embeddingResult.tokensUsed,
+      embeddingCached: false, // AutoMem handles embedding internally
+      topicCandidates: topics.length,
+      peopleCandidates: people.length,
+      eventCandidates: events.length,
+      tokensUsed: 0, // Not tracked when using AutoMem
     },
   };
 }
@@ -358,9 +302,9 @@ export function isSemanticRagEnabled(): boolean {
 }
 
 /**
- * Force refresh of vector index availability check
+ * Force refresh of AutoMem availability check
  */
-export function refreshVectorIndexCheck(): void {
-  vectorIndexesAvailable = null;
-  vectorIndexCheckTime = 0;
+export function refreshAutomemCheck(): void {
+  automemAvailableCache = null;
+  automemCheckTime = 0;
 }

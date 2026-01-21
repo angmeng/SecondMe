@@ -7,7 +7,7 @@ export {
   retrieveContext,
   getSemanticRagConfig,
   isSemanticRagEnabled,
-  refreshVectorIndexCheck,
+  refreshAutomemCheck,
   type SemanticRagConfig,
   type SemanticRetrievalResult,
 } from './hybrid-retriever.js';

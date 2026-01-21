@@ -1,16 +1,16 @@
 /**
  * Individual Contact API Route
  * User Story 2: GET and PATCH operations for a specific contact
+ * Uses AutoMem for metadata storage
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
-
-// FalkorDB configuration
-const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
-const FALKORDB_PORT = process.env['FALKORDB_PORT'] || '6379';
-const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'] || 'falkordb_default_password';
-const GRAPH_NAME = 'knowledge_graph';
+import {
+  getContactMetadata,
+  updateContactMetadata,
+  getPersonaName,
+} from '@/lib/automem-client';
 
 /**
  * Request body for PATCH /api/contacts/[id]
@@ -22,62 +22,6 @@ interface PatchContactBody {
 }
 
 /**
- * Execute a Cypher query against FalkorDB
- */
-async function queryFalkorDB(
-  query: string,
-  params: Record<string, unknown> = {}
-): Promise<unknown[]> {
-  const ioredis = await import('ioredis');
-  const Redis = ioredis.default;
-
-  const client = new Redis({
-    host: FALKORDB_HOST,
-    port: parseInt(FALKORDB_PORT, 10),
-    password: FALKORDB_PASSWORD,
-    maxRetriesPerRequest: 3,
-  });
-
-  try {
-    // Build CYPHER prefix with parameters
-    // FalkorDB requires: CYPHER param1=value1 param2=value2 MATCH ...
-    const cypherPrefix = Object.entries(params)
-      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-      .join(' ');
-
-    const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${query}` : query;
-    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
-
-    return parseGraphResult(result);
-  } finally {
-    await client.quit();
-  }
-}
-
-/**
- * Parse FalkorDB result into readable format
- */
-function parseGraphResult(result: unknown): unknown[] {
-  if (!result || !Array.isArray(result) || result.length === 0) {
-    return [];
-  }
-
-  const [header, data] = result;
-
-  if (!data || !Array.isArray(data) || data.length === 0) {
-    return [];
-  }
-
-  return data.map((row: unknown[]) => {
-    const obj: Record<string, unknown> = {};
-    (header as string[]).forEach((colName: string, index: number) => {
-      obj[colName] = row[index];
-    });
-    return obj;
-  });
-}
-
-/**
  * GET /api/contacts/[id] - Get a specific contact with persona info
  */
 export async function GET(
@@ -86,22 +30,6 @@ export async function GET(
 ) {
   try {
     const { id: contactId } = await params;
-
-    // Get contact with optional assigned persona name
-    const query = `
-      MATCH (c:Contact {id: $contactId})
-      OPTIONAL MATCH (p:Persona {id: c.assignedPersona})
-      RETURN c.id AS id, c.name AS name, c.phoneNumber AS phoneNumber,
-             c.relationshipType AS relationshipType,
-             c.relationshipConfidence AS relationshipConfidence,
-             c.relationshipSource AS relationshipSource,
-             c.botEnabled AS botEnabled,
-             c.assignedPersona AS assignedPersona, p.name AS assignedPersonaName,
-             c.lastInteraction AS lastInteraction
-      LIMIT 1
-    `;
-
-    const results = await queryFalkorDB(query, { contactId });
 
     // Decode contactId in case it's URL-encoded
     const decodedContactId = decodeURIComponent(contactId);
@@ -126,64 +54,46 @@ export async function GET(
       console.error('[Contact API] Redis lookup failed:', err);
     }
 
-    // If contact not in FalkorDB, use Redis data (or 404 if not in Redis either)
-    if (results.length === 0) {
-      if (!redisContact) {
-        return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
-      }
+    // Get contact metadata from AutoMem
+    const metadata = await getContactMetadata(decodedContactId);
 
-      // Build contact from Redis data only
-      const contact = {
-        id: redisContact.id,
-        name: redisContact.name && !redisContact.name.endsWith('@c.us')
-          ? redisContact.name
-          : decodedContactId.replace('@c.us', ''),
-        phoneNumber: redisContact.phoneNumber || decodedContactId.replace('@c.us', ''),
-        relationshipType: 'acquaintance',
-        relationshipConfidence: null,
-        relationshipSource: null,
-        botEnabled: false,
-        isPaused,
-        isGlobalPaused,
-        isContactPaused,
-        assignedPersona: undefined,
-        assignedPersonaName: undefined,
-        lastInteraction: undefined,
-      };
-
-      return NextResponse.json({ contact });
+    // Get assigned persona name if there's a persona assigned
+    let assignedPersonaName: string | undefined;
+    const assignedPersonaId = metadata?.assignedPersona;
+    if (assignedPersonaId) {
+      assignedPersonaName = (await getPersonaName(assignedPersonaId)) || undefined;
     }
 
-    // FalkorDB has the contact - merge with Redis data for name
-    const row = results[0] as Record<string, unknown>;
-
-    // Check if name is missing or is a raw ID (ends with @c.us)
-    let contactName = row['name'] as string | undefined;
-    const nameIsMissing = !contactName || contactName.endsWith('@c.us');
-
-    if (nameIsMissing && redisContact?.name && !redisContact.name.endsWith('@c.us')) {
-      contactName = redisContact.name;
+    // If we have no data from either source, return 404
+    if (!metadata && !redisContact) {
+      return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
     }
 
-    // Final fallback: strip @c.us suffix
+    // Determine contact name (prefer Redis as it has WhatsApp-provided name)
+    let contactName = metadata?.name;
     if (!contactName || contactName.endsWith('@c.us')) {
-      contactName = decodedContactId.replace('@c.us', '');
+      if (redisContact?.name && !redisContact.name.endsWith('@c.us')) {
+        contactName = redisContact.name;
+      } else {
+        contactName = decodedContactId.replace('@c.us', '');
+      }
     }
 
+    // Build the contact response
     const contact = {
-      id: row['id'],
+      id: decodedContactId,
       name: contactName,
-      phoneNumber: row['phoneNumber'] || redisContact?.phoneNumber || undefined,
-      relationshipType: row['relationshipType'] || 'acquaintance',
-      relationshipConfidence: row['relationshipConfidence'] ?? null,
-      relationshipSource: row['relationshipSource'] ?? null,
-      botEnabled: row['botEnabled'] ?? false,
+      phoneNumber: metadata?.phoneNumber || redisContact?.phoneNumber || decodedContactId.replace('@c.us', ''),
+      relationshipType: metadata?.relationshipType || 'acquaintance',
+      relationshipConfidence: metadata?.relationshipConfidence ?? null,
+      relationshipSource: metadata?.relationshipSource ?? null,
+      botEnabled: metadata?.botEnabled ?? false,
       isPaused,
       isGlobalPaused,
       isContactPaused,
-      assignedPersona: row['assignedPersona'] || undefined,
-      assignedPersonaName: row['assignedPersonaName'] || undefined,
-      lastInteraction: row['lastInteraction'] || undefined,
+      assignedPersona: assignedPersonaId || undefined,
+      assignedPersonaName: assignedPersonaName || undefined,
+      lastInteraction: metadata?.lastInteraction || undefined,
     };
 
     return NextResponse.json({ contact });
@@ -205,76 +115,55 @@ export async function PATCH(
     const { id: contactId } = await params;
     const body = (await request.json()) as PatchContactBody;
 
-    // Build SET clause dynamically based on provided fields
-    const setClause: string[] = ['c.updatedAt = timestamp()'];
-    const queryParams: Record<string, unknown> = { contactId };
+    // Decode contactId in case it's URL-encoded
+    const decodedContactId = decodeURIComponent(contactId);
+
+    // Build updates object from provided fields
+    const updates: Partial<{
+      assignedPersona?: string;
+      relationshipType?: string;
+      botEnabled?: boolean;
+    }> = {};
 
     // Handle assignedPersona (null = clear assignment)
     if ('assignedPersona' in body) {
       if (body.assignedPersona === null) {
-        // Remove the property by setting to null
-        setClause.push('c.assignedPersona = null');
+        updates.assignedPersona = undefined; // Clear assignment
       } else {
-        setClause.push('c.assignedPersona = $assignedPersona');
-        queryParams['assignedPersona'] = body.assignedPersona;
+        updates.assignedPersona = body.assignedPersona;
       }
     }
 
     // Handle relationshipType
     if ('relationshipType' in body && body.relationshipType) {
-      setClause.push('c.relationshipType = $relationshipType');
-      queryParams['relationshipType'] = body.relationshipType;
+      updates.relationshipType = body.relationshipType;
     }
 
     // Handle botEnabled
     if ('botEnabled' in body && typeof body.botEnabled === 'boolean') {
-      setClause.push('c.botEnabled = $botEnabled');
-      queryParams['botEnabled'] = body.botEnabled;
+      updates.botEnabled = body.botEnabled;
     }
 
     // If no fields to update, return early
-    if (setClause.length === 1) {
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    // Use MERGE to create the contact if it doesn't exist
-    // This handles the case where contacts exist in WhatsApp/Redis but not yet in FalkorDB
-    const query = `
-      MERGE (c:Contact {id: $contactId})
-      ON CREATE SET c.createdAt = timestamp()
-      SET ${setClause.join(', ')}
-      RETURN c.id AS id, c.assignedPersona AS assignedPersona
-    `;
+    // Update contact metadata in AutoMem
+    await updateContactMetadata(decodedContactId, updates);
 
-    const results = await queryFalkorDB(query, queryParams);
-
-    if (results.length === 0) {
-      return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
-    }
-
-    // If assignedPersona was updated, fetch the name
-    let assignedPersonaName: string | undefined;
-    const row = results[0] as Record<string, unknown>;
-    if (row['assignedPersona']) {
-      const personaQuery = `
-        MATCH (p:Persona {id: $personaId})
-        RETURN p.name AS name
-        LIMIT 1
-      `;
-      const personaResults = await queryFalkorDB(personaQuery, {
-        personaId: row['assignedPersona'],
-      });
-      if (personaResults.length > 0) {
-        assignedPersonaName = (personaResults[0] as Record<string, unknown>)['name'] as string;
-      }
+    // Get assigned persona name if there's a persona assigned
+    let assignedPersonaName: string | null = null;
+    if (updates.assignedPersona) {
+      assignedPersonaName = await getPersonaName(updates.assignedPersona);
     }
 
     return NextResponse.json({
       success: true,
       contact: {
-        id: row['id'],
-        assignedPersona: row['assignedPersona'] || null,
-        assignedPersonaName: assignedPersonaName || null,
+        id: decodedContactId,
+        assignedPersona: updates.assignedPersona || null,
+        assignedPersonaName: assignedPersonaName,
       },
     });
   } catch (error: unknown) {
