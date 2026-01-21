@@ -189,7 +189,10 @@ export default function ConversationThread({
       currentDate = messageDate;
       groupedMessages.push({ date: messageDate, messages: [message] });
     } else {
-      groupedMessages[groupedMessages.length - 1].messages.push(message);
+      const lastGroup = groupedMessages[groupedMessages.length - 1];
+      if (lastGroup) {
+        lastGroup.messages.push(message);
+      }
     }
   }
 
