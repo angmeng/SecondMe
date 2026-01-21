@@ -1,76 +1,15 @@
 /**
  * Persona API Route - Individual Persona Operations
  * User Story 2: Handles GET, PATCH, DELETE for individual personas
+ * Uses AutoMem for storage
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-
-// FalkorDB configuration
-const FALKORDB_HOST = process.env['FALKORDB_HOST'] || 'localhost';
-const FALKORDB_PORT = process.env['FALKORDB_PORT'] || '6379';
-const FALKORDB_PASSWORD = process.env['FALKORDB_PASSWORD'] || 'falkordb_default_password';
-const GRAPH_NAME = 'knowledge_graph';
-
-/**
- * Execute a Cypher query against FalkorDB
- */
-async function queryFalkorDB(
-  query: string,
-  params: Record<string, unknown> = {}
-): Promise<unknown[]> {
-  const Redis = (await import('ioredis')).default;
-
-  const client = new Redis({
-    host: FALKORDB_HOST,
-    port: parseInt(FALKORDB_PORT, 10),
-    password: FALKORDB_PASSWORD,
-    maxRetriesPerRequest: 3,
-  });
-
-  try {
-    // Build CYPHER prefix with parameters
-    // FalkorDB requires: CYPHER param1=value1 param2=value2 MATCH ...
-    const cypherPrefix = Object.entries(params)
-      .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-      .join(' ');
-
-    const fullQuery = cypherPrefix ? `CYPHER ${cypherPrefix} ${query}` : query;
-
-    const result = await client.call('GRAPH.QUERY', GRAPH_NAME, fullQuery);
-
-    return parseGraphResult(result);
-  } finally {
-    await client.quit();
-  }
-}
-
-/**
- * Parse FalkorDB result into readable format
- */
-function parseGraphResult(result: unknown): unknown[] {
-  if (!result || !Array.isArray(result) || result.length === 0) {
-    return [];
-  }
-
-  const [header, data] = result;
-
-  // Handle write queries that return empty headers (e.g., DETACH DELETE)
-  if (!header || !Array.isArray(header) || header.length === 0) {
-    return [];
-  }
-
-  if (!data || !Array.isArray(data) || data.length === 0) {
-    return [];
-  }
-
-  return data.map((row: unknown[]) => {
-    const obj: Record<string, unknown> = {};
-    header.forEach((colName: string, index: number) => {
-      obj[colName] = row[index];
-    });
-    return obj;
-  });
-}
+import {
+  getPersonaById,
+  updatePersona,
+  deletePersona,
+} from '@/lib/automem-client';
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -79,32 +18,15 @@ interface RouteParams {
 /**
  * GET /api/persona/[id] - Get a single persona
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
-    const query = `
-      MATCH (p:Persona {id: $personaId})
-      RETURN p.id AS id, p.name AS name, p.styleGuide AS styleGuide,
-             p.tone AS tone, p.exampleMessages AS exampleMessages,
-             p.applicableTo AS applicableTo
-    `;
+    const persona = await getPersonaById(id);
 
-    const results = await queryFalkorDB(query, { personaId: id });
-
-    if (results.length === 0) {
+    if (!persona) {
       return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
     }
-
-    const row = results[0] as Record<string, unknown>;
-    const persona = {
-      id: row['id'],
-      name: row['name'],
-      styleGuide: row['styleGuide'],
-      tone: row['tone'],
-      exampleMessages: row['exampleMessages'] || [],
-      applicableTo: row['applicableTo'] || [],
-    };
 
     return NextResponse.json(persona);
   } catch (error: unknown) {
@@ -121,41 +43,38 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const { id } = await params;
     const body = await request.json();
 
-    // Build SET clause dynamically
-    const setClauses: string[] = ['p.updatedAt = timestamp()'];
-    const queryParams: Record<string, unknown> = { personaId: id };
+    // Build updates object from provided fields
+    const updates: Partial<{
+      name: string;
+      styleGuide: string;
+      tone: string;
+      exampleMessages: string[];
+      applicableTo: string[];
+    }> = {};
 
     if (body.name !== undefined) {
-      setClauses.push('p.name = $name');
-      queryParams['name'] = body.name;
+      updates.name = body.name;
     }
     if (body.styleGuide !== undefined) {
-      setClauses.push('p.styleGuide = $styleGuide');
-      queryParams['styleGuide'] = body.styleGuide;
+      updates.styleGuide = body.styleGuide;
     }
     if (body.tone !== undefined) {
-      setClauses.push('p.tone = $tone');
-      queryParams['tone'] = body.tone;
+      updates.tone = body.tone;
     }
     if (body.exampleMessages !== undefined) {
-      setClauses.push('p.exampleMessages = $exampleMessages');
-      queryParams['exampleMessages'] = body.exampleMessages;
+      updates.exampleMessages = body.exampleMessages;
     }
     if (body.applicableTo !== undefined) {
-      setClauses.push('p.applicableTo = $applicableTo');
-      queryParams['applicableTo'] = body.applicableTo;
+      updates.applicableTo = body.applicableTo;
     }
 
-    const query = `
-      MATCH (p:Persona {id: $personaId})
-      SET ${setClauses.join(', ')}
-      RETURN p.id AS id
-    `;
-
-    const results = await queryFalkorDB(query, queryParams);
-
-    if (results.length === 0) {
-      return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
+    try {
+      await updatePersona(id, updates);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Persona not found') {
+        return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
+      }
+      throw error;
     }
 
     // Invalidate persona cache in Redis
@@ -190,7 +109,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 /**
  * DELETE /api/persona/[id] - Delete a persona
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
@@ -203,25 +122,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Cannot delete default personas' }, { status: 400 });
     }
 
-    // First check if persona exists
-    const checkQuery = `
-      MATCH (p:Persona {id: $personaId})
-      RETURN p.id AS id
-    `;
+    // Check if persona exists first
+    const existing = await getPersonaById(id);
 
-    const existing = await queryFalkorDB(checkQuery, { personaId: id });
-
-    if (existing.length === 0) {
+    if (!existing) {
       return NextResponse.json({ error: 'Persona not found' }, { status: 404 });
     }
 
     // Delete the persona
-    const deleteQuery = `
-      MATCH (p:Persona {id: $personaId})
-      DETACH DELETE p
-    `;
-
-    await queryFalkorDB(deleteQuery, { personaId: id });
+    await deletePersona(id);
 
     return NextResponse.json({
       message: 'Persona deleted successfully',

@@ -8,7 +8,7 @@ import { redisClient } from './client.js';
 import { parseWhatsAppExport, filterTextMessages, groupIntoConversationChunks, ParsedMessage } from '../ingestion/chat-parser.js';
 import { extractEntities, deduplicateEntities } from '../ingestion/entity-extractor.js';
 import { buildGraphFromEntities } from '../ingestion/graph-builder.js';
-import { recordProcessedMessage, updateContactLastInteraction, updateContactRelationshipType } from '../falkordb/mutations.js';
+import { recordProcessedMessage, updateContactLastInteraction, updateContactRelationshipType } from '../automem/index.js';
 import { RelationshipAnalyzer, RelationshipType, RelationshipSignal } from '../analysis/relationship-analyzer.js';
 import { StyleAnalyzer } from '../analysis/style-analyzer.js';
 
@@ -529,7 +529,7 @@ class RedisConsumer {
         );
 
         console.log(
-          `[${SERVICE_NAME}] Batch processed: ${deduplicated.length} entities, ${graphResult.relationshipsCreated} relationships`
+          `[${SERVICE_NAME}] Batch processed: ${graphResult.entitiesStored} entities stored, ${graphResult.entitiesFailed} failed`
         );
       }
 

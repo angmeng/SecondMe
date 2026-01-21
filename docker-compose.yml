@@ -17,20 +17,73 @@ services:
       retries: 5
     restart: unless-stopped
 
-  falkordb:
+  # AutoMem Stack - replaces standalone FalkorDB
+  automem-falkordb:
     image: falkordb/falkordb:v4.14.11
-    container_name: secondme_falkordb
+    container_name: secondme_automem_falkordb
     ports:
-      - "6379:6379"
+      - "6378:6379"
     volumes:
-      - falkordb_data:/data
+      - automem_falkordb_data:/data
     environment:
-      - FALKORDB_ARGS=--requirepass ${FALKORDB_PASSWORD:-falkordb_default_password}
+      - FALKORDB_ARGS=--requirepass ${AUTOMEM_FALKORDB_PASSWORD:-automem_default_password}
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${FALKORDB_PASSWORD:-falkordb_default_password}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${AUTOMEM_FALKORDB_PASSWORD:-automem_default_password}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: secondme_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  automem:
+    image: ghcr.io/verygoodplugins/automem:latest
+    container_name: secondme_automem
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - AUTOMEM_API_TOKEN=${AUTOMEM_API_TOKEN}
+      - ADMIN_API_TOKEN=${AUTOMEM_ADMIN_TOKEN}
+      - FALKORDB_HOST=automem-falkordb
+      - FALKORDB_PORT=6379
+      - FALKORDB_PASSWORD=${AUTOMEM_FALKORDB_PASSWORD:-automem_default_password}
+      - FALKORDB_GRAPH=memories
+      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_COLLECTION=secondme_memories
+      - VECTOR_SIZE=3072
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - EMBEDDING_MODEL=text-embedding-3-large
+      - EMBEDDING_PROVIDER=openai
+      - SEARCH_WEIGHT_VECTOR=0.35
+      - SEARCH_WEIGHT_KEYWORD=0.35
+      - SEARCH_WEIGHT_TAG=0.15
+      - SEARCH_WEIGHT_IMPORTANCE=0.10
+      - SEARCH_WEIGHT_RECENCY=0.10
+    depends_on:
+      automem-falkordb:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   gateway:
@@ -71,9 +124,8 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
-      - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-falkordb_default_password}
+      - AUTOMEM_API_URL=http://automem:8001
+      - AUTOMEM_API_TOKEN=${AUTOMEM_API_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-debug}
     volumes:
@@ -81,7 +133,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      falkordb:
+      automem:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
@@ -103,9 +155,8 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
-      - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-falkordb_default_password}
+      - AUTOMEM_API_URL=http://automem:8001
+      - AUTOMEM_API_TOKEN=${AUTOMEM_API_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-debug}
     volumes:
@@ -113,7 +164,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      falkordb:
+      automem:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
@@ -135,10 +186,14 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - AUTOMEM_API_URL=http://automem:8001
+      - AUTOMEM_API_TOKEN=${AUTOMEM_API_TOKEN}
     depends_on:
       gateway:
         condition: service_healthy
       orchestrator:
+        condition: service_healthy
+      automem:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
@@ -151,5 +206,7 @@ services:
 volumes:
   redis_data:
     driver: local
-  falkordb_data:
+  automem_falkordb_data:
+    driver: local
+  qdrant_data:
     driver: local

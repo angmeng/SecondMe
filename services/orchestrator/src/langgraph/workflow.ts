@@ -10,7 +10,7 @@ import { haikuClient } from '../anthropic/haiku-client.js';
 import { redisClient } from '../redis/client.js';
 import { routerNode } from './router-node.js';
 import { graphAndPersonaNode } from './graph-node.js';
-import { ContactContext, PersonaContext, ContactInfo, StyleProfile } from '../falkordb/queries.js';
+import { type ContactContext, type PersonaContext, type ContactInfo, type StyleProfile } from '../automem/recall.js';
 import {
   calculateTypingDelay as calculateHTSTypingDelay,
   calculateCognitivePause,

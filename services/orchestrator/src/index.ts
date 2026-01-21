@@ -14,7 +14,7 @@ config({ path: resolve(__dirname, '../../../.env') });
 
 import express, { Request, Response } from 'express';
 import { redisClient } from './redis/client.js';
-import { falkordbClient } from './falkordb/client.js';
+import { automemClient } from './automem/client.js';
 import { buildWorkflow } from './langgraph/workflow.js';
 import { metricsCollector } from './metrics/collector.js';
 import { getReadyDeferredMessages } from './hts/index.js';
@@ -145,10 +145,10 @@ async function startOrchestratorService() {
     await redisClient.connect();
     console.log('[Orchestrator] Redis connected');
 
-    // Initialize FalkorDB connection
-    console.log('[Orchestrator] Connecting to FalkorDB...');
-    await falkordbClient.connect();
-    console.log('[Orchestrator] FalkorDB connected');
+    // Initialize AutoMem connection
+    console.log('[Orchestrator] Connecting to AutoMem...');
+    await automemClient.connect();
+    console.log('[Orchestrator] AutoMem connected');
 
     // Verify Anthropic API key
     if (!process.env['ANTHROPIC_API_KEY']) {
@@ -213,7 +213,7 @@ async function shutdown() {
     metricsCollector.stopPublishing();
 
     await redisClient.quit();
-    await falkordbClient.quit();
+    await automemClient.quit();
     console.log('[Orchestrator] Orchestrator service shut down');
     process.exit(0);
   } catch (error) {

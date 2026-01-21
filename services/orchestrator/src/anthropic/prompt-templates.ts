@@ -5,7 +5,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { ContactContext, PersonaContext, StyleProfile } from '../falkordb/queries.js';
+import { type ContactContext, type PersonaContext, type StyleProfile } from '../automem/recall.js';
 
 /**
  * Build cached system prompt for Sonnet with persona and graph context

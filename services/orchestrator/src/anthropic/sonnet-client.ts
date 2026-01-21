@@ -4,7 +4,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { StyleProfile } from '../falkordb/queries.js';
+import { type StyleProfile } from '../automem/recall.js';
 
 const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 

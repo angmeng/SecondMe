@@ -14,7 +14,7 @@ config({ path: resolve(__dirname, '../../../.env') });
 
 import express, { Request, Response } from 'express';
 import { redisClient } from './redis/client.js';
-import { falkordbClient } from './falkordb/client.js';
+import { automemClient } from './automem/client.js';
 import { startConsumer, stopConsumer } from './redis/consumer.js';
 
 const SERVICE_NAME = 'Graph Worker';
@@ -33,9 +33,9 @@ async function startGraphWorkerService() {
     console.log(`[${SERVICE_NAME}] Connecting to Redis...`);
     await redisClient.connect();
 
-    // Connect to FalkorDB
-    console.log(`[${SERVICE_NAME}] Connecting to FalkorDB...`);
-    await falkordbClient.connect();
+    // Connect to AutoMem
+    console.log(`[${SERVICE_NAME}] Connecting to AutoMem...`);
+    await automemClient.connect();
 
     console.log(`[${SERVICE_NAME}] Graph Worker Service started successfully`);
 
@@ -45,19 +45,18 @@ async function startGraphWorkerService() {
         // Check Redis status
         const redisOk = redisClient.status === 'ready';
 
-        // Check FalkorDB via ping
-        let falkorOk = false;
+        // Check AutoMem via ping
+        let automemOk = false;
         try {
-          await falkordbClient.query('RETURN 1');
-          falkorOk = true;
+          automemOk = await automemClient.ping();
         } catch {
-          falkorOk = false;
+          automemOk = false;
         }
 
-        const status = redisOk && falkorOk ? 'healthy' : 'degraded';
+        const status = redisOk && automemOk ? 'healthy' : 'degraded';
         const checks = [
           { name: 'redis', status: redisOk ? 'pass' : 'fail' as const },
-          { name: 'falkordb', status: falkorOk ? 'pass' : 'fail' as const },
+          { name: 'automem', status: automemOk ? 'pass' : 'fail' as const },
         ];
 
         res.status(status === 'healthy' ? 200 : 503).json({
@@ -167,7 +166,7 @@ async function shutdown() {
     stopConsumer();
 
     await redisClient.quit();
-    await falkordbClient.quit();
+    await automemClient.quit();
     console.log(`[${SERVICE_NAME}] All connections closed`);
     process.exit(0);
   } catch (error) {
