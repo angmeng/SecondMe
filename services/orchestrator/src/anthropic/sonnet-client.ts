@@ -120,6 +120,9 @@ class SonnetClient {
   /**
    * Build messages array with conversation history
    * History messages come first (chronological), then the current message
+   *
+   * Merges consecutive same-role messages to comply with Claude API requirements
+   * (messages must alternate between 'user' and 'assistant' roles)
    */
   private buildMessagesWithHistory(
     currentContent: string,
@@ -130,18 +133,32 @@ class SonnetClient {
     // Add conversation history if available
     if (history && history.length > 0) {
       for (const msg of history) {
-        messages.push({
-          role: msg.role,
-          content: msg.content,
-        });
+        const lastMessage = messages[messages.length - 1];
+
+        // If same role as previous message, merge content
+        if (lastMessage && lastMessage.role === msg.role) {
+          // Merge by appending with newline separator
+          lastMessage.content = `${lastMessage.content}\n${msg.content}`;
+        } else {
+          messages.push({
+            role: msg.role,
+            content: msg.content,
+          });
+        }
       }
     }
 
-    // Add current message
-    messages.push({
-      role: 'user',
-      content: currentContent,
-    });
+    // Add current message (merge if last history message was also 'user')
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.role === 'user') {
+      // Merge current message with last user message
+      lastMessage.content = `${lastMessage.content}\n${currentContent}`;
+    } else {
+      messages.push({
+        role: 'user',
+        content: currentContent,
+      });
+    }
 
     return messages;
   }

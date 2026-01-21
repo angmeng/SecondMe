@@ -6,28 +6,13 @@
  */
 
 import { historyConfig, estimateTokens } from '../config/history-config.js';
+import {
+  type StoredMessage,
+  type ConversationChunk,
+} from '@secondme/shared-types';
 
-/**
- * Stored message from Redis
- */
-export interface StoredMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-  type?: 'incoming' | 'outgoing' | 'fromMe';
-}
-
-/**
- * A chunk of related messages (same topic/conversation thread)
- */
-export interface ConversationChunk {
-  messages: StoredMessage[];
-  keywords: Set<string>;
-  startTime: number;
-  endTime: number;
-  tokenCount: number;
-}
+// Re-export for convenience
+export type { StoredMessage, ConversationChunk };
 
 /**
  * Common English stopwords to filter out

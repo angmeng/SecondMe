@@ -10,31 +10,20 @@
  */
 
 import { redisClient } from './client.js';
+import { type StoredMessage, parseIntEnv, isStoredMessage } from '@secondme/shared-types';
+
+// Re-export for convenience
+export type { StoredMessage };
 
 /**
  * Configuration for history storage
+ * Values must match orchestrator's config for consistency
  */
 const HISTORY_CONFIG = {
-  keyPrefix: 'HISTORY:',
-  maxMessages: 100, // Store buffer for chunking
-  ttlSeconds: 7 * 24 * 60 * 60, // 7 days
+  keyPrefix: process.env['HISTORY_KEY_PREFIX'] || 'HISTORY:',
+  maxMessages: parseIntEnv('HISTORY_MAX_MESSAGES', 100),
+  ttlSeconds: parseIntEnv('HISTORY_TTL_SECONDS', 7 * 24 * 60 * 60),
 };
-
-/**
- * Message structure stored in Redis
- */
-export interface StoredMessage {
-  /** Unique message ID (for idempotency) */
-  id: string;
-  /** Message role: 'user' (contact) or 'assistant' (bot/user manual) */
-  role: 'user' | 'assistant';
-  /** Message content */
-  content: string;
-  /** Unix timestamp in milliseconds */
-  timestamp: number;
-  /** Source type for debugging */
-  type: 'incoming' | 'outgoing' | 'fromMe';
-}
 
 /**
  * Get the Redis key for a contact's history
@@ -100,43 +89,63 @@ class HistoryStore {
     maxMessages: number,
     ttlSeconds: number
   ): Promise<number> {
-    // Lua script for atomic operation
+    // Lua script for atomic Redis operation
+    // Uses a separate Set (key:ids) for O(1) duplicate detection by message ID
+    // Note: Redis eval() is the standard way to run Lua scripts atomically - this is safe
     const luaScript = `
       local key = KEYS[1]
+      local idsKey = KEYS[2]
       local messageJson = ARGV[1]
       local timestamp = tonumber(ARGV[2])
       local messageId = ARGV[3]
       local maxMessages = tonumber(ARGV[4])
       local ttlSeconds = tonumber(ARGV[5])
 
-      -- Check for duplicate by scanning recent messages
-      -- (We use messageId in the JSON, so we need to check content)
-      local existing = redis.call('ZRANGEBYSCORE', key, timestamp - 1000, timestamp + 1000)
-      for _, msg in ipairs(existing) do
-        if string.find(msg, messageId, 1, true) then
-          return 0  -- Duplicate found
-        end
+      -- Check for duplicate using separate IDs set (O(1) lookup)
+      if redis.call('SISMEMBER', idsKey, messageId) == 1 then
+        return 0  -- Duplicate found
       end
+
+      -- Add message ID to the IDs set
+      redis.call('SADD', idsKey, messageId)
 
       -- Add message with timestamp as score
       redis.call('ZADD', key, timestamp, messageJson)
 
-      -- Trim to max messages (keep most recent)
+      -- Trim messages to max (keep most recent)
       local count = redis.call('ZCARD', key)
       if count > maxMessages then
+        -- Get messages to be removed
+        local toRemove = redis.call('ZRANGE', key, 0, count - maxMessages - 1)
+
+        -- Extract message IDs from removed messages and remove from IDs set
+        for _, msg in ipairs(toRemove) do
+          -- Extract ID from JSON (pattern: "id":"<value>")
+          local id = string.match(msg, '"id":"([^"]+)"')
+          if id then
+            redis.call('SREM', idsKey, id)
+          end
+        end
+
+        -- Remove old messages from sorted set
         redis.call('ZREMRANGEBYRANK', key, 0, count - maxMessages - 1)
       end
 
-      -- Refresh TTL
+      -- Refresh TTL on both keys
       redis.call('EXPIRE', key, ttlSeconds)
+      redis.call('EXPIRE', idsKey, ttlSeconds)
 
       return 1  -- Success
     `;
 
+    const idsKey = `${key}:ids`;
+
+    // Redis eval runs Lua scripts atomically - this is the standard Redis pattern
     const result = await redisClient.client.eval(
       luaScript,
-      1,
+      2, // Now using 2 keys
       key,
+      idsKey,
       messageJson,
       timestamp.toString(),
       messageId,
@@ -165,7 +174,12 @@ class HistoryStore {
       const messages: StoredMessage[] = [];
       for (const json of results) {
         try {
-          messages.push(JSON.parse(json) as StoredMessage);
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredMessage(parsed)) {
+            messages.push(parsed);
+          } else {
+            console.error(`[History Store] Invalid message structure in Redis:`, json);
+          }
         } catch (parseError) {
           console.error(`[History Store] Error parsing message JSON:`, parseError);
         }
@@ -185,9 +199,11 @@ class HistoryStore {
    */
   async clearHistory(contactId: string): Promise<void> {
     const key = getHistoryKey(contactId);
+    const idsKey = `${key}:ids`;
 
     try {
-      await redisClient.client.del(key);
+      // Delete both the messages sorted set and the IDs set
+      await redisClient.client.del(key, idsKey);
       console.log(`[History Store] Cleared history for ${contactId}`);
     } catch (error) {
       console.error(`[History Store] Error clearing history for ${contactId}:`, error);
@@ -236,7 +252,12 @@ class HistoryStore {
       const messages: StoredMessage[] = [];
       for (const json of results) {
         try {
-          messages.push(JSON.parse(json) as StoredMessage);
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredMessage(parsed)) {
+            messages.push(parsed);
+          } else {
+            console.error(`[History Store] Invalid message structure in Redis:`, json);
+          }
         } catch (parseError) {
           console.error(`[History Store] Error parsing message JSON:`, parseError);
         }
@@ -252,6 +273,3 @@ class HistoryStore {
 
 // Export singleton instance
 export const historyStore = new HistoryStore();
-
-// Export types
-export type { StoredMessage };

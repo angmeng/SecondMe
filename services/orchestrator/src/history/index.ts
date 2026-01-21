@@ -3,10 +3,17 @@
  * Exports history retrieval and processing utilities
  */
 
-export { historyCache, type ConversationMessage, type HistoryRetrievalResult } from './history-cache.js';
+// Re-export types from shared package
+export type {
+  StoredMessage,
+  ConversationMessage,
+  ConversationChunk,
+  HistoryRetrievalResult,
+} from '@secondme/shared-types';
+
+// Export cache instance and functions
+export { historyCache } from './history-cache.js';
 export {
-  type StoredMessage,
-  type ConversationChunk,
   extractKeywords,
   calculateKeywordOverlap,
   chunkByKeywordContinuity,

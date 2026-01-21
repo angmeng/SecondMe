@@ -8,28 +8,16 @@
 
 import { redisClient } from '../redis/client.js';
 import { historyConfig, getHistoryKey } from '../config/history-config.js';
+import { processMessagesWithChunking } from './keyword-chunker.js';
 import {
-  StoredMessage,
-  processMessagesWithChunking,
-} from './keyword-chunker.js';
+  type StoredMessage,
+  type ConversationMessage,
+  type HistoryRetrievalResult,
+  isStoredMessage,
+} from '@secondme/shared-types';
 
-/**
- * Message format for Claude API
- */
-export interface ConversationMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-/**
- * Result of history retrieval
- */
-export interface HistoryRetrievalResult {
-  messages: ConversationMessage[];
-  messageCount: number;
-  tokenEstimate: number;
-  method: 'chunked' | 'direct' | 'disabled';
-}
+// Re-export types for convenience
+export type { StoredMessage, ConversationMessage, HistoryRetrievalResult };
 
 /**
  * History Cache class for retrieving conversation context
@@ -79,7 +67,12 @@ class HistoryCache {
       const storedMessages: StoredMessage[] = [];
       for (const json of rawMessages) {
         try {
-          storedMessages.push(JSON.parse(json) as StoredMessage);
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredMessage(parsed)) {
+            storedMessages.push(parsed);
+          } else {
+            console.error('[History Cache] Invalid message structure in Redis:', json);
+          }
         } catch (parseError) {
           console.error('[History Cache] Error parsing message:', parseError);
         }
@@ -138,7 +131,11 @@ class HistoryCache {
       const messages: StoredMessage[] = [];
       for (const json of rawMessages) {
         try {
-          messages.push(JSON.parse(json) as StoredMessage);
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredMessage(parsed)) {
+            messages.push(parsed);
+          }
+          // Skip invalid messages silently in raw mode
         } catch {
           // Skip invalid messages
         }
@@ -182,6 +179,3 @@ class HistoryCache {
 
 // Export singleton instance
 export const historyCache = new HistoryCache();
-
-// Export types
-export type { StoredMessage, ConversationMessage, HistoryRetrievalResult };
