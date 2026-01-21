@@ -15,7 +15,9 @@ SecondMe is a **Context-Adaptive WhatsApp Bot** that acts as a personal AI clone
 
 ```
 SecondMe/
-├── frontend/                 # Next.js 16.1.1 Dashboard
+├── packages/
+│   └── shared-types/        # Shared TypeScript types (@secondme/shared-types)
+├── frontend/                # Next.js 16.1.1 Dashboard
 │   └── src/
 │       ├── app/             # App Router pages & API routes
 │       ├── components/      # React 19.2 components
@@ -100,6 +102,7 @@ WhatsApp ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `PAUSE:{contactId}` - Contact-specific pause
 - `RATE:{contactId}` - Rate limit counter
 - `PERSONA:{id}` - Cached persona (30-min TTL)
+- `HISTORY:{contactId}` - Conversation history for RAG context (configurable TTL)
 
 ### Environment Variables
 Required in `.env`:

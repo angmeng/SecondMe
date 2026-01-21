@@ -3,73 +3,72 @@
  * Configures storage and retrieval of conversation history for RAG context
  */
 
-export interface HistoryStorageConfig {
-  /** Maximum messages to store per contact */
-  maxMessages: number;
-  /** TTL in seconds (auto-expire old history) */
-  ttlSeconds: number;
-  /** Redis key prefix */
-  keyPrefix: string;
-}
+import {
+  type HistoryConfig,
+  type HistoryStorageConfig,
+  type HistoryRetrievalConfig,
+  type KeywordChunkingConfig,
+  parseIntEnv,
+  parseFloatEnv,
+} from '@secondme/shared-types';
 
-export interface HistoryRetrievalConfig {
-  /** Maximum tokens for history in prompt */
-  maxTokens: number;
-  /** Minimum messages to retrieve (even if under token budget) */
-  minMessages: number;
-  /** Maximum messages to retrieve */
-  maxMessages: number;
-  /** Maximum age of messages to include (hours) */
-  maxAgeHours: number;
-  /** Maximum length per message before truncation */
-  maxMessageLength: number;
-}
+// Re-export types for convenience
+export type {
+  HistoryConfig,
+  HistoryStorageConfig,
+  HistoryRetrievalConfig,
+  KeywordChunkingConfig,
+};
 
-export interface KeywordChunkingConfig {
-  /** Time gap (minutes) to consider as potential topic boundary */
-  gapMinutes: number;
-  /** Minimum keyword overlap ratio to keep in same chunk (0-1) */
-  minKeywordOverlap: number;
-  /** Minimum word length to consider as keyword */
-  minWordLength: number;
-}
+// Default values (can be overridden via environment variables)
+const DEFAULTS = {
+  // Storage defaults (must match gateway)
+  HISTORY_KEY_PREFIX: 'HISTORY:',
+  HISTORY_MAX_MESSAGES: 100,
+  HISTORY_TTL_SECONDS: 7 * 24 * 60 * 60, // 7 days
 
-export interface HistoryConfig {
-  /** Feature flag */
-  enabled: boolean;
-  /** Storage configuration (Gateway) */
-  storage: HistoryStorageConfig;
-  /** Retrieval configuration (Orchestrator) */
-  retrieval: HistoryRetrievalConfig;
-  /** Keyword chunking configuration */
-  chunking: KeywordChunkingConfig;
-}
+  // Retrieval defaults
+  HISTORY_MAX_TOKENS: 1500,
+  HISTORY_MIN_MESSAGES: 5,
+  HISTORY_RETRIEVAL_MAX_MESSAGES: 40,
+  HISTORY_MAX_AGE_HOURS: 24,
+  HISTORY_MAX_MESSAGE_LENGTH: 500,
+
+  // Chunking defaults
+  HISTORY_GAP_MINUTES: 10,
+  HISTORY_MIN_KEYWORD_OVERLAP: 0.25,
+  HISTORY_MIN_WORD_LENGTH: 4,
+};
 
 /**
- * Default configuration values
+ * Configuration values loaded from environment variables with defaults
+ * Using environment variables ensures Gateway and Orchestrator stay in sync
  */
 export const historyConfig: HistoryConfig = {
   // Feature flag - can be disabled via environment variable
   enabled: process.env['ENABLE_CONVERSATION_HISTORY'] !== 'false',
 
+  // Storage config (must match gateway for correct Redis key lookup)
   storage: {
-    maxMessages: 100, // Store buffer for chunking
-    ttlSeconds: 7 * 24 * 60 * 60, // 7 days
-    keyPrefix: 'HISTORY:',
+    keyPrefix: process.env['HISTORY_KEY_PREFIX'] || DEFAULTS.HISTORY_KEY_PREFIX,
+    maxMessages: parseIntEnv('HISTORY_MAX_MESSAGES', DEFAULTS.HISTORY_MAX_MESSAGES),
+    ttlSeconds: parseIntEnv('HISTORY_TTL_SECONDS', DEFAULTS.HISTORY_TTL_SECONDS),
   },
 
+  // Retrieval config
   retrieval: {
-    maxTokens: 1500, // Token budget for history
-    minMessages: 5, // Always get some context
-    maxMessages: 40, // Don't go too far back
-    maxAgeHours: 24, // Ignore messages older than 24h
-    maxMessageLength: 500, // Truncate very long messages
+    maxTokens: parseIntEnv('HISTORY_MAX_TOKENS', DEFAULTS.HISTORY_MAX_TOKENS),
+    minMessages: parseIntEnv('HISTORY_MIN_MESSAGES', DEFAULTS.HISTORY_MIN_MESSAGES),
+    maxMessages: parseIntEnv('HISTORY_RETRIEVAL_MAX_MESSAGES', DEFAULTS.HISTORY_RETRIEVAL_MAX_MESSAGES),
+    maxAgeHours: parseIntEnv('HISTORY_MAX_AGE_HOURS', DEFAULTS.HISTORY_MAX_AGE_HOURS),
+    maxMessageLength: parseIntEnv('HISTORY_MAX_MESSAGE_LENGTH', DEFAULTS.HISTORY_MAX_MESSAGE_LENGTH),
   },
 
+  // Chunking config
   chunking: {
-    gapMinutes: 10, // 10 minute gap = potential topic boundary
-    minKeywordOverlap: 0.25, // 25% keyword overlap to stay in same chunk
-    minWordLength: 4, // Words shorter than 4 chars are filtered
+    gapMinutes: parseIntEnv('HISTORY_GAP_MINUTES', DEFAULTS.HISTORY_GAP_MINUTES),
+    minKeywordOverlap: parseFloatEnv('HISTORY_MIN_KEYWORD_OVERLAP', DEFAULTS.HISTORY_MIN_KEYWORD_OVERLAP),
+    minWordLength: parseIntEnv('HISTORY_MIN_WORD_LENGTH', DEFAULTS.HISTORY_MIN_WORD_LENGTH),
   },
 };
 
