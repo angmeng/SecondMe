@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch server.ts",
-    "build": "next build && tsc server.ts --outDir dist --module commonjs",
+    "build": "next build && tsc -p tsconfig.server.json",
     "start": "node dist/server.js",
     "lint": "next lint",
     "test": "vitest",
