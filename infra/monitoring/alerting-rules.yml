@@ -1,0 +1,189 @@
+# SecondMe Alerting Rules
+# T133: Performance monitoring and alerting configuration
+#
+# Use with Prometheus Alertmanager or compatible systems
+
+groups:
+  - name: secondme-service-health
+    rules:
+      # Service availability alerts
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been down for more than 1 minute"
+
+      - alert: GatewayHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="gateway"}[5m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Gateway P95 latency is high"
+          description: "Gateway P95 latency is {{ $value }}s (threshold: 3s)"
+
+      - alert: OrchestratorHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="orchestrator"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Orchestrator P95 latency is high"
+          description: "Orchestrator P95 latency is {{ $value }}s (threshold: 5s)"
+
+  - name: secondme-whatsapp
+    rules:
+      - alert: WhatsAppDisconnected
+        expr: whatsapp_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "WhatsApp client disconnected"
+          description: "WhatsApp connection has been down for more than 2 minutes. Re-authentication may be required."
+
+      - alert: SessionExpiringSoon
+        expr: (session_expiry_timestamp - time()) < 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "WhatsApp session expiring soon"
+          description: "Session will expire in less than 1 hour. User should re-authenticate."
+
+      - alert: HighMessageRate
+        expr: rate(messages_received_total[1m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High incoming message rate detected"
+          description: "Receiving {{ $value }} messages/min. Rate limiting may trigger."
+
+  - name: secondme-ai
+    rules:
+      - alert: AnthropicAPIErrors
+        expr: rate(anthropic_api_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Anthropic API error rate elevated"
+          description: "{{ $value }} errors/sec from Anthropic API"
+
+      - alert: HighTokenUsage
+        expr: sum(rate(tokens_used_total[1h])) > 100000
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "High token usage detected"
+          description: "Using {{ $value }} tokens/hour. Monitor for cost implications."
+
+      - alert: LowCacheHitRate
+        expr: cache_hit_rate < 0.5
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low prompt cache hit rate"
+          description: "Cache hit rate is {{ $value }}. Consider optimizing cached prompts."
+
+  - name: secondme-database
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis connection failed"
+
+      - alert: FalkorDBDown
+        expr: falkordb_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FalkorDB is down"
+          description: "FalkorDB connection failed"
+
+      - alert: RedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis using {{ $value | humanizePercentage }} of max memory"
+
+      - alert: FalkorDBSlowQueries
+        expr: histogram_quantile(0.95, rate(falkordb_query_duration_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FalkorDB P95 query latency is high"
+          description: "P95 query latency is {{ $value }}s (threshold: 100ms)"
+
+  - name: secondme-resources
+    rules:
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.job }}"
+          description: "CPU usage is {{ $value | humanizePercentage }}"
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / node_memory_MemTotal_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.job }}"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk space critically low"
+          description: "Only {{ $value | humanizePercentage }} disk space remaining"
+
+  - name: secondme-security
+    rules:
+      - alert: HighRateLimitTriggers
+        expr: rate(rate_limit_exceeded_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiting frequently triggered"
+          description: "{{ $value }} rate limit triggers/sec - possible abuse"
+
+      - alert: MasterKillSwitchEnabled
+        expr: master_kill_switch_enabled == 1
+        for: 1m
+        labels:
+          severity: info
+        annotations:
+          summary: "Master kill switch is enabled"
+          description: "All bot activity is currently paused"
+
+      - alert: HighPauseCount
+        expr: active_pauses_total > 10
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Many contacts are paused"
+          description: "{{ $value }} contacts currently have active pauses"
