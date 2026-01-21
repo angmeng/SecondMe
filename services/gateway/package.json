@@ -12,6 +12,7 @@
     "test:watch": "vitest watch"
   },
   "dependencies": {
+    "@secondme/shared-types": "*",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "ioredis": "^5.9.1",

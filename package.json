@@ -4,6 +4,7 @@
   "description": "Context-Adaptive Personal AI Clone - WhatsApp automation with knowledge graph memory",
   "private": true,
   "workspaces": [
+    "packages/shared-types",
     "services/gateway",
     "services/orchestrator",
     "services/graph-worker",
@@ -11,7 +12,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w services/gateway\" \"npm run dev -w services/orchestrator\" \"npm run dev -w services/graph-worker\" \"npm run dev -w frontend\"",
-    "build": "npm run build -w services/gateway && npm run build -w services/orchestrator && npm run build -w services/graph-worker && npm run build -w frontend",
+    "build": "npm run build -w packages/shared-types && npm run build -w services/gateway && npm run build -w services/orchestrator && npm run build -w services/graph-worker && npm run build -w frontend",
     "test": "vitest run",
     "test:contract": "vitest run --testPathPattern=contract",
     "test:integration": "vitest run --testPathPattern=integration",

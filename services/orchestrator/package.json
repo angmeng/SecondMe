@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@secondme/shared-types": "*",
     "@langchain/langgraph": "^1.0.7",
     "dotenv": "^17.2.3",
     "express": "^4.22.1",

@@ -5,6 +5,7 @@
 
 import { Client, Message } from 'whatsapp-web.js';
 import { redisClient } from '../redis/client.js';
+import { historyStore } from '../redis/history-store.js';
 import { io } from '../index.js';
 
 export class MessageHandler {
@@ -61,6 +62,16 @@ export class MessageHandler {
 
     console.log(`[Gateway MessageHandler] Incoming message from ${contactId}: ${content}`);
 
+    // Store message in conversation history (before pause/rate limit checks)
+    // This ensures context is preserved even for messages that don't get processed
+    await historyStore.addMessage(contactId, {
+      id: message.id._serialized,
+      role: 'user',
+      content,
+      timestamp,
+      type: 'incoming',
+    });
+
     // Check if contact is paused (global or contact-specific)
     const isPaused = await redisClient.isPaused(contactId);
     if (isPaused) {
@@ -110,8 +121,19 @@ export class MessageHandler {
   private async handleFromMeMessage(message: Message): Promise<void> {
     const contactId = message.to;
     const content = message.body;
+    const timestamp = message.timestamp * 1000; // Convert to milliseconds
 
     console.log(`[Gateway MessageHandler] fromMe message detected to ${contactId}: ${content}`);
+
+    // Store user's manual message in conversation history
+    // Marked as 'assistant' role since it's from the bot's side of the conversation
+    await historyStore.addMessage(contactId, {
+      id: message.id._serialized,
+      role: 'assistant',
+      content,
+      timestamp,
+      type: 'fromMe',
+    });
 
     // Auto-pause bot for this contact (indefinite - no TTL)
     const pausedAt = Date.now();

@@ -5,6 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { type StyleProfile } from '../automem/recall.js';
+import { type ConversationMessage } from '../history/index.js';
 
 const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 
@@ -64,12 +65,14 @@ class SonnetClient {
 
   /**
    * Generate contextual response with prompt caching for persona and graph context
+   * Now supports conversation history for multi-turn context
    */
   async getContextualResponse(
     content: string,
     personaStyleGuide: string,
     graphContext: GraphContext,
-    styleProfile?: StyleProfile | null
+    styleProfile?: StyleProfile | null,
+    conversationHistory?: ConversationMessage[]
   ): Promise<ContextualResponse> {
     try {
       const startTime = Date.now();
@@ -77,17 +80,15 @@ class SonnetClient {
       // Build cached system prompt with persona, graph schema, and style profile
       const systemPrompt = this.buildCachedSystemPrompt(personaStyleGuide, graphContext, styleProfile);
 
+      // Build messages array with conversation history
+      const messages = this.buildMessagesWithHistory(content, conversationHistory);
+
       const response = await this.client.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 1024,
         temperature: 0.7,
         system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: content,
-          },
-        ],
+        messages,
       });
 
       const latency = Date.now() - startTime;
@@ -100,8 +101,9 @@ class SonnetClient {
       const usageWithCache = response.usage as UsageWithCache;
       const cacheReadTokens = usageWithCache.cache_read_input_tokens || 0;
       const cacheWriteTokens = usageWithCache.cache_creation_input_tokens || 0;
+      const historyCount = conversationHistory?.length ?? 0;
 
-      console.log(`[Sonnet Client] Contextual response generated (${latency}ms, ${tokensUsed} tokens, cache read: ${cacheReadTokens}, cache write: ${cacheWriteTokens})`);
+      console.log(`[Sonnet Client] Contextual response generated (${latency}ms, ${tokensUsed} tokens, cache read: ${cacheReadTokens}, cache write: ${cacheWriteTokens}, history: ${historyCount} msgs)`);
 
       return {
         response: responseText,
@@ -113,6 +115,52 @@ class SonnetClient {
       console.error('[Sonnet Client] Response generation error:', error);
       throw error;
     }
+  }
+
+  /**
+   * Build messages array with conversation history
+   * History messages come first (chronological), then the current message
+   *
+   * Merges consecutive same-role messages to comply with Claude API requirements
+   * (messages must alternate between 'user' and 'assistant' roles)
+   */
+  private buildMessagesWithHistory(
+    currentContent: string,
+    history?: ConversationMessage[]
+  ): Anthropic.Messages.MessageParam[] {
+    const messages: Anthropic.Messages.MessageParam[] = [];
+
+    // Add conversation history if available
+    if (history && history.length > 0) {
+      for (const msg of history) {
+        const lastMessage = messages[messages.length - 1];
+
+        // If same role as previous message, merge content
+        if (lastMessage && lastMessage.role === msg.role) {
+          // Merge by appending with newline separator
+          lastMessage.content = `${lastMessage.content}\n${msg.content}`;
+        } else {
+          messages.push({
+            role: msg.role,
+            content: msg.content,
+          });
+        }
+      }
+    }
+
+    // Add current message (merge if last history message was also 'user')
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.role === 'user') {
+      // Merge current message with last user message
+      lastMessage.content = `${lastMessage.content}\n${currentContent}`;
+    } else {
+      messages.push({
+        role: 'user',
+        content: currentContent,
+      });
+    }
+
+    return messages;
   }
 
   /**

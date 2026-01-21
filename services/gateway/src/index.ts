@@ -16,6 +16,7 @@ import { Server } from 'socket.io';
 import { createServer } from 'http';
 import { whatsappClient } from './whatsapp/client.js';
 import { redisClient } from './redis/client.js';
+import { historyStore } from './redis/history-store.js';
 import { AuthHandler } from './whatsapp/auth.js';
 import { MessageHandler } from './whatsapp/message-handler.js';
 import { MessageSender } from './whatsapp/sender.js';
@@ -241,6 +242,15 @@ async function startResponseConsumer() {
 
             if (result.success) {
               console.log(`[Gateway] Response sent to ${contactId}: ${result.messageId}`);
+
+              // Store bot response in conversation history
+              await historyStore.addMessage(contactId, {
+                id: result.messageId || `response-${Date.now()}`,
+                role: 'assistant',
+                content,
+                timestamp: Date.now(),
+                type: 'outgoing',
+              });
             } else {
               console.error(`[Gateway] Failed to send response to ${contactId}: ${result.error}`);
             }
