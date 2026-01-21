@@ -1,0 +1,31 @@
+{
+  "name": "@secondme/graph-worker",
+  "version": "1.0.0",
+  "description": "Knowledge Graph Worker - Background ingestion and entity extraction",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file=../../.env dist/index.js",
+    "test": "vitest",
+    "test:watch": "vitest watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "ioredis": "^5.9.1",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}

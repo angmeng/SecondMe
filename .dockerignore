@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Testing
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Environment variables (will be passed via docker-compose)
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+*.md
+docs/
+specs/
+
+# Test files
+**/*.test.ts
+**/*.spec.ts
+tests/
+__tests__/
+
+# WhatsApp Web.js session data (mounted as volume)
+.wwebjs_auth/
+.wwebjs_cache/

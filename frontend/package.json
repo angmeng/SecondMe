@@ -1,0 +1,49 @@
+{
+  "name": "@secondme/frontend",
+  "version": "1.0.0",
+  "description": "SecondMe Dashboard - Next.js frontend for monitoring and control",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "build": "next build && tsc -p tsconfig.server.json",
+    "start": "node dist/server.js",
+    "lint": "next lint",
+    "test": "vitest",
+    "test:watch": "vitest watch",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@tailwindcss/postcss": "^4.1.18",
+    "ioredis": "^5.9.1",
+    "next": "^16.1.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "socket.io-client": "^4.8.3",
+    "tailwindcss": "^4.1.18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.18.0",
+    "eslint-config-next": "^16.1.1",
+    "jsdom": "^26.0.0",
+    "postcss": "^8.4.49",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^4.0.16"
+  },
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}
