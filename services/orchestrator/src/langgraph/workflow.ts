@@ -11,6 +11,7 @@ import { redisClient } from '../redis/client.js';
 import { routerNode } from './router-node.js';
 import { graphAndPersonaNode } from './graph-node.js';
 import { type ContactContext, type PersonaContext, type ContactInfo, type StyleProfile } from '../automem/recall.js';
+import { type ConversationMessage } from '../history/index.js';
 import {
   calculateTypingDelay as calculateHTSTypingDelay,
   calculateCognitivePause,
@@ -67,6 +68,10 @@ export interface WorkflowState {
 
   // Style profile (from graph node - per-contact communication patterns)
   styleProfile?: StyleProfile;
+
+  // Conversation history (from graph node - recent messages for context)
+  conversationHistory?: ConversationMessage[];
+  historyMessageCount?: number;
 
   // Response generation
   response?: string;
@@ -266,7 +271,7 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       events: [],
     };
 
-    // Call Sonnet with context and style profile
+    // Call Sonnet with context, style profile, and conversation history
     const result = await sonnetClient.getContextualResponse(
       state.content,
       persona.styleGuide,
@@ -274,12 +279,14 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
         people: context.people,
         topics: context.topics,
       },
-      state.styleProfile // Pass contact-specific style profile
+      state.styleProfile, // Pass contact-specific style profile
+      state.conversationHistory // Pass conversation history for multi-turn context
     );
 
     const latency = Date.now() - startTime;
+    const historyCount = state.historyMessageCount ?? 0;
     console.log(
-      `[Workflow] Substantive response generated in ${latency}ms (${result.tokensUsed} tokens, cache read: ${result.cacheReadTokens}, cache write: ${result.cacheWriteTokens})`
+      `[Workflow] Substantive response generated in ${latency}ms (${result.tokensUsed} tokens, cache read: ${result.cacheReadTokens}, cache write: ${result.cacheWriteTokens}, history: ${historyCount} msgs)`
     );
 
     // Calculate enhanced typing delay with HTS
@@ -512,6 +519,11 @@ const WorkflowStateAnnotation = Annotation.Root({
   // Persona
   persona: Annotation<PersonaContext | undefined>,
   personaCached: Annotation<boolean | undefined>,
+  // Style profile
+  styleProfile: Annotation<StyleProfile | undefined>,
+  // Conversation history
+  conversationHistory: Annotation<ConversationMessage[] | undefined>,
+  historyMessageCount: Annotation<number | undefined>,
   // Response
   response: Annotation<string | undefined>,
   tokensUsed: Annotation<number | undefined>,

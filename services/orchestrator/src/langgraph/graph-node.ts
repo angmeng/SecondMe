@@ -16,6 +16,7 @@ import {
 import { personaCache } from '../redis/persona-cache.js';
 import { getStyleProfileWithCache } from '../redis/style-cache.js';
 import { retrieveContext, isSemanticRagEnabled } from '../retrieval/index.js';
+import { historyCache } from '../history/index.js';
 
 // Default user ID (single-user MVP)
 const DEFAULT_USER_ID = 'user-1';
@@ -197,12 +198,13 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
       relationshipType = state.relationshipSignal.type;
     }
 
-    // Run graph query, persona retrieval, and style profile in parallel
+    // Run graph query, persona retrieval, style profile, and history retrieval in parallel
     // Use semantic retrieval if enabled, otherwise fall back to legacy
-    const [retrievalResult, personaResult, styleProfile] = await Promise.all([
+    const [retrievalResult, personaResult, styleProfile, historyResult] = await Promise.all([
       retrieveContext(state.content, state.contactId),
       getPersonaWithCache(relationshipType, contactInfo?.assignedPersona),
       getStyleProfileWithCache(state.contactId, () => getContactStyleProfile(state.contactId)),
+      historyCache.getRecentHistory(state.contactId),
     ]);
 
     const graphContext = retrievalResult.context;
@@ -214,11 +216,12 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
       : 'method: legacy (semantic disabled)';
 
     const styleInfo = styleProfile ? `style: ${styleProfile.sampleCount} samples` : 'style: none';
+    const historyInfo = `history: ${historyResult.messageCount} msgs (~${historyResult.tokenEstimate} tokens)`;
 
     console.log(
       `[Graph+Persona Node] Retrieved in ${latency}ms (${methodInfo}): ` +
         `${graphContext.people.length} people, ${graphContext.topics.length} topics, ` +
-        `${graphContext.events.length} events, persona: ${personaResult.persona?.name}, ${styleInfo}`
+        `${graphContext.events.length} events, persona: ${personaResult.persona?.name}, ${styleInfo}, ${historyInfo}`
     );
 
     return {
@@ -229,6 +232,8 @@ export async function graphAndPersonaNode(state: WorkflowState): Promise<Partial
       ...(personaResult.persona && { persona: personaResult.persona }),
       personaCached: personaResult.cached,
       ...(styleProfile && { styleProfile }),
+      conversationHistory: historyResult.messages,
+      historyMessageCount: historyResult.messageCount,
     };
   } catch (error: any) {
     console.error('[Graph+Persona Node] Error:', error);

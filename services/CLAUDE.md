@@ -9,7 +9,7 @@ services/
 ├── gateway/           # WhatsApp integration (port 3001)
 │   └── src/
 │       ├── whatsapp/  # Client, auth, sender, message handler
-│       ├── redis/     # Pub/sub and queue client
+│       ├── redis/     # Pub/sub, queue client, history store
 │       ├── socket/    # Real-time event emitter
 │       └── middleware/# Security middleware
 ├── orchestrator/      # AI workflow (port 3002)
@@ -17,6 +17,8 @@ services/
 │       ├── langgraph/ # Workflow, router, graph nodes
 │       ├── anthropic/ # Haiku, Sonnet clients, prompts
 │       ├── falkordb/  # Cypher queries
+│       ├── history/   # Conversation history RAG (keyword chunking)
+│       ├── config/    # Feature configurations
 │       ├── hts/       # Human typing simulation
 │       └── redis/     # Consumer, persona cache
 └── graph-worker/      # Knowledge ingestion (port 3003)
@@ -40,6 +42,7 @@ Bridges WhatsApp Web.js with the microservices architecture via Redis Streams.
 | `whatsapp/sender.ts` | Outgoing messages with HTS typing simulation |
 | `socket/events.ts` | Socket.io event emitter to frontend |
 | `redis/client.ts` | ioredis client, pub/sub, streams |
+| `redis/history-store.ts` | Conversation history storage (HISTORY:{contactId}) |
 
 ### Message Handler Pattern
 ```typescript
@@ -80,6 +83,9 @@ Orchestrates AI workflow using LangGraph, manages Claude API calls, and retrieve
 | `anthropic/haiku-client.ts` | Claude Haiku for classification |
 | `anthropic/sonnet-client.ts` | Claude Sonnet with prompt caching |
 | `anthropic/prompt-templates.ts` | System prompts, persona templates |
+| `history/history-cache.ts` | In-memory LRU cache for history |
+| `history/keyword-chunker.ts` | Keyword extraction and topic chunking |
+| `config/history-config.ts` | History feature configuration |
 | `falkordb/queries.ts` | Cypher query builders |
 | `hts/delay-calculator.ts` | Typing delay calculation |
 | `hts/sleep-hours.ts` | Sleep hours enforcement |
@@ -116,6 +122,39 @@ const response = await anthropic.messages.create({
   messages: [{ role: 'user', content: userMessage }]
 });
 ```
+
+### Conversation History (RAG Context)
+
+The history module provides conversation context for more coherent responses.
+
+**Architecture:**
+- Gateway stores messages → `HISTORY:{contactId}` Redis list
+- Orchestrator retrieves and processes → keyword-based chunking
+- Relevant chunks included in Claude prompt
+
+**Key Components:**
+| File | Responsibility |
+|------|----------------|
+| `history/history-cache.ts` | In-memory LRU cache (reduces Redis calls) |
+| `history/keyword-chunker.ts` | Extract keywords, chunk by topic continuity |
+| `config/history-config.ts` | Token limits, TTL, chunking thresholds |
+
+**Keyword Chunking Algorithm:**
+```typescript
+// 1. Extract keywords from each message (nouns, verbs)
+// 2. Group messages into chunks by:
+//    - Time gaps (configurable minutes)
+//    - Keyword overlap ratio (0-1 threshold)
+// 3. Select most relevant chunks for current query
+// 4. Fit within token budget
+```
+
+**Shared Types:**
+Types are defined in `@secondme/shared-types` package:
+- `StoredMessage` - Redis storage format
+- `ConversationMessage` - Claude API format
+- `HistoryConfig` - Feature configuration
+- `ConversationChunk` - Grouped message chunk
 
 ## Graph Worker Service
 
