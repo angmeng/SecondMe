@@ -5,6 +5,7 @@
 
 import type { StoredMessage } from './history.js';
 import type { PairingRequest, ApprovedContact, DeniedContact } from './pairing.js';
+import type { SkillManifest, SkillConfigField, SkillInfo } from './skills.js';
 
 /**
  * Type guard for StoredMessage
@@ -117,5 +118,94 @@ export function isDeniedContact(obj: unknown): obj is DeniedContact {
     // Optional fields
     (contact['displayName'] === undefined || typeof contact['displayName'] === 'string') &&
     (contact['reason'] === undefined || typeof contact['reason'] === 'string')
+  );
+}
+
+/**
+ * Type guard for SkillConfigField
+ * Validates that an unknown object has the correct shape for SkillConfigField
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid SkillConfigField
+ */
+export function isSkillConfigField(obj: unknown): obj is SkillConfigField {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const field = obj as Record<string, unknown>;
+
+  return (
+    typeof field['key'] === 'string' &&
+    (field['type'] === 'string' ||
+      field['type'] === 'number' ||
+      field['type'] === 'boolean' ||
+      field['type'] === 'select') &&
+    typeof field['label'] === 'string' &&
+    // Optional fields
+    (field['description'] === undefined || typeof field['description'] === 'string') &&
+    (field['options'] === undefined || Array.isArray(field['options'])) &&
+    (field['required'] === undefined || typeof field['required'] === 'boolean')
+  );
+}
+
+/**
+ * Type guard for SkillManifest
+ * Validates that an unknown object has the correct shape for SkillManifest
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid SkillManifest
+ */
+export function isSkillManifest(obj: unknown): obj is SkillManifest {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const manifest = obj as Record<string, unknown>;
+
+  return (
+    typeof manifest['id'] === 'string' &&
+    typeof manifest['name'] === 'string' &&
+    typeof manifest['version'] === 'string' &&
+    typeof manifest['description'] === 'string' &&
+    Array.isArray(manifest['configFields']) &&
+    (manifest['configFields'] as unknown[]).every(isSkillConfigField) &&
+    Array.isArray(manifest['permissions']) &&
+    (manifest['permissions'] as unknown[]).every(
+      (p) =>
+        p === 'redis:read' ||
+        p === 'redis:write' ||
+        p === 'automem:read' ||
+        p === 'automem:write' ||
+        p === 'network'
+    ) &&
+    // Optional fields
+    (manifest['author'] === undefined || typeof manifest['author'] === 'string')
+  );
+}
+
+/**
+ * Type guard for SkillInfo
+ * Validates that an unknown object has the correct shape for SkillInfo
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid SkillInfo
+ */
+export function isSkillInfo(obj: unknown): obj is SkillInfo {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const info = obj as Record<string, unknown>;
+
+  return (
+    isSkillManifest(info['manifest']) &&
+    typeof info['enabled'] === 'boolean' &&
+    (info['health'] === 'healthy' ||
+      info['health'] === 'degraded' ||
+      info['health'] === 'unhealthy') &&
+    (info['lastHealthCheck'] === undefined || typeof info['lastHealthCheck'] === 'number') &&
+    typeof info['config'] === 'object' &&
+    info['config'] !== null
   );
 }

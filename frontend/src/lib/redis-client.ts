@@ -343,8 +343,8 @@ class RedisClient {
           if (json) {
             try {
               const parsed = JSON.parse(json);
-              // Basic validation
-              if (parsed && parsed.contactId && parsed.code) {
+              // Basic validation - check for contactId and status (code field was removed in simplified implementation)
+              if (parsed && parsed.contactId && parsed.status === 'pending') {
                 requests.push(parsed as PairingRequest);
               }
             } catch {
@@ -465,10 +465,9 @@ class RedisClient {
     // Set approved (no TTL - permanent)
     await this.client.set(`PAIRING:approved:${contactId}`, JSON.stringify(approved));
 
-    // Delete pending request and code lookup if exists
+    // Delete pending request if exists
     if (pending) {
       await this.client.del(`PAIRING:pending:${contactId}`);
-      await this.client.del(`PAIRING:codes:${pending.code}`);
     }
 
     console.log(`[Frontend Redis] Contact ${contactId} approved by ${approvedBy} (tier: ${tier})`);
@@ -506,10 +505,9 @@ class RedisClient {
     // Set denied with TTL
     await this.client.setex(`PAIRING:denied:${contactId}`, ttlSeconds, JSON.stringify(denied));
 
-    // Delete pending request and code lookup if exists
+    // Delete pending request if exists
     if (pending) {
       await this.client.del(`PAIRING:pending:${contactId}`);
-      await this.client.del(`PAIRING:codes:${pending.code}`);
     }
 
     console.log(

@@ -1,9 +1,9 @@
 # Moltbot Implementation Plan for SecondMe
 
 **Created**: 2026-01-30
-**Updated**: 2026-01-30
+**Updated**: 2026-01-31
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Reviewed
+**Status**: Phase 1 Complete ✅
 
 ---
 
@@ -13,19 +13,49 @@ This plan translates moltbot learnings into actionable tasks for SecondMe, organ
 
 ### Priority Matrix
 
-| Priority | Feature | Complexity | Value | Dependencies |
-|----------|---------|------------|-------|--------------|
-| P0 | Pairing Mode | Medium | High | None |
-| P1 | Security Audit System | Low | Medium | None |
-| P1 | Plugin Architecture | High | High | None |
-| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture |
-| P2 | Voice Message Support | Medium | Medium | None |
-| P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem |
-| P3 | Onboarding Wizard | Medium | Medium | None |
+| Priority | Feature | Complexity | Value | Dependencies | Status |
+|----------|---------|------------|-------|--------------|--------|
+| P0 | Pairing Mode | Medium | High | None | ✅ Complete |
+| P1 | Security Audit System | Low | Medium | None | ✅ Complete |
+| P1 | Plugin Architecture | High | High | None | ✅ Complete |
+| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | 🔲 Not Started |
+| P2 | Voice Message Support | Medium | Medium | None | 🔲 Not Started |
+| P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem | 🔲 Not Started |
+| P3 | Onboarding Wizard | Medium | Medium | None | 🔲 Not Started |
 
 ---
 
-## Phase 1: Security Hardening (P0-P1)
+## Phase 1 Completion Summary ✅
+
+**Completed**: 2026-01-31
+**Review**: All 8 tasks implemented, 100% complete
+
+### Implementation Highlights
+
+| Task | Files Created | Key Features |
+|------|---------------|--------------|
+| 1.1.1 Pairing Types | `shared-types/pairing.ts`, `guards.ts` | ContactTier, PairingStatus, runtime type guards |
+| 1.1.2 Pairing Store | `gateway/redis/pairing-store.ts` | 3 Lua scripts (atomic ops), auto-approve existing |
+| 1.1.3 Message Handler | `gateway/whatsapp/message-handler.ts` | Pairing gate before history, auto-reply |
+| 1.1.4 Frontend Dashboard | `frontend/src/app/pairing/`, 7 API routes | Real-time Socket.io, tier management |
+| 1.1.5 Migration Script | `gateway/scripts/migrate-existing-contacts.ts` | SCAN-based, dry-run, batching |
+| 1.2.1 Security Logger | `gateway/utils/logger.ts` | File transport, masking, helpers |
+| 1.2.2 Content Analyzer | `gateway/utils/content-analyzer.ts` | 5 detectors, risk scoring |
+| 1.2.3 Secret Detection | `.gitleaks.toml`, `.github/workflows/security.yml` | Anthropic/OpenAI key patterns |
+
+### Design Deviations (Intentional)
+
+1. **No Verification Codes**: Simplified to admin-only approval (simpler UX)
+2. **No TTL on Pending**: Requests stay until admin action (prevents losing requests)
+
+### Known Limitations
+
+- **Hardcoded Admin ID**: `'dashboard-admin'` placeholder until auth implementation
+- **Future Work**: Proper user authentication for audit trails (out of scope for Phase 1)
+
+---
+
+## Phase 1: Security Hardening (P0-P1) ✅ COMPLETE
 
 ### Epic 1.1: Contact Pairing Mode
 
@@ -904,176 +934,84 @@ Task 1.2.3 (Secrets) ── independent
 
 ---
 
-## Phase 2: Extensibility Architecture (P1)
+## Phase 2: Extensibility Architecture (P1) ✅ COMPLETE
+
+**Completed**: 2026-01-31
+**Review**: Tasks 2.1.1-2.1.3 implemented, Task 2.1.4 deferred
 
 ### Epic 2.1: Skill/Plugin System
 
-**Goal**: Refactor tools into independently loadable skills for customization and extensibility.
+**Goal**: Refactor context retrieval capabilities into independently loadable skills for customization and extensibility.
 
-#### Task 2.1.1: Skill Interface & Registry
+**Key Design Decision**: Skills are **context providers**, not Claude tools. SecondMe uses direct orchestration, so skills execute during `graphAndPersonaNode` and return structured data for the Claude prompt.
 
-**Scope**: Define core skill abstractions
+#### Implementation Summary
 
-**Files to create**:
-- `packages/shared-types/src/skills.ts`
-- `services/orchestrator/src/skills/registry.ts`
-- `services/orchestrator/src/skills/base-skill.ts`
+| Task | Status | Key Files |
+|------|--------|-----------|
+| 2.1.1 Skill Interface & Registry | ✅ Complete | `shared-types/skills.ts`, `orchestrator/skills/registry.ts` |
+| 2.1.2 Built-in Skills Migration | ✅ Complete | 4 skills in `orchestrator/skills/built-in/` |
+| 2.1.3 Skill Configuration UI | ✅ Complete | `frontend/src/app/skills/`, API routes |
+| 2.1.4 External Skill Loading | ⏸️ Deferred | Requires security sandboxing |
 
-**Deliverables**:
-```typescript
-// packages/shared-types/src/skills.ts
-export interface SkillManifest {
-  name: string;
-  version: string;
-  description: string;
-  author?: string;
-  tools: ToolDefinition[];
-  config?: Record<string, ConfigField>;
-  permissions?: Permission[];
-}
+#### Built-in Skills
 
-export interface Skill {
-  manifest: SkillManifest;
+| Skill | Description | Config Fields |
+|-------|-------------|---------------|
+| `knowledge-graph` | Retrieves context from FalkorDB (people, topics, events) | maxPeople, maxTopics, maxEvents, semanticEnabled |
+| `persona` | Gets persona style guide based on relationship type | cacheTTL, useRelationshipFallback, defaultTone |
+| `style-profile` | Retrieves communication style profile | enabled, minSampleMessages, cacheTTL |
+| `conversation-history` | Gets recent conversation with keyword chunking | enabled, maxMessages, tokenBudget, useKeywordChunking |
 
-  // Lifecycle
-  activate(context: SkillContext): Promise<void>;
-  deactivate(): Promise<void>;
-
-  // Health
-  healthCheck(): Promise<HealthStatus>;
-}
-
-export interface SkillContext {
-  redis: Redis;
-  logger: Logger;
-  config: Record<string, unknown>;
-  eventEmitter: EventEmitter;
-}
-```
+#### Architecture
 
 ```typescript
-// services/orchestrator/src/skills/registry.ts
-export class SkillRegistry {
-  private skills: Map<string, Skill> = new Map();
-  private enabled: Set<string> = new Set();
+// Feature flag for backwards compatibility
+const USE_SKILL_SYSTEM = process.env['USE_SKILL_SYSTEM'] === 'true';
 
-  register(skill: Skill): void;
-  unregister(name: string): void;
-  enable(name: string): Promise<void>;
-  disable(name: string): Promise<void>;
-
-  getTools(): Tool[];          // Collect tools from enabled skills
-  getSkill(name: string): Skill | undefined;
-  listSkills(): SkillManifest[];
-  listEnabled(): string[];
+export async function contextRetrievalNode(state: WorkflowState) {
+  if (USE_SKILL_SYSTEM) {
+    return graphAndPersonaNodeWithSkills(state);
+  }
+  return graphAndPersonaNode(state);  // Legacy path
 }
 ```
 
-**Acceptance Criteria**:
-- [ ] Registry supports dynamic skill loading
-- [ ] Skills can declare dependencies
-- [ ] Activation/deactivation lifecycle respected
-- [ ] Tools correctly collected from enabled skills
-
----
-
-#### Task 2.1.2: Built-in Skills Migration
-
-**Scope**: Convert existing orchestrator tools to skill format
-
-**Files to create**:
+**Redis Keys**:
 ```
-services/orchestrator/src/skills/
-├── built-in/
-│   ├── core/                  # Core conversation skill
-│   │   ├── manifest.json
-│   │   └── index.ts
-│   ├── knowledge-graph/       # FalkorDB queries
-│   │   ├── manifest.json
-│   │   └── index.ts
-│   ├── memory/                # AutoMem operations
-│   │   ├── manifest.json
-│   │   └── index.ts
-│   └── persona/               # Persona management
-│       ├── manifest.json
-│       └── index.ts
+SKILLS:enabled           # Set of enabled skill IDs
+SKILLS:config:{skillId}  # JSON config per skill
 ```
 
-**Migration Steps**:
-1. Extract tool definitions from current workflow
-2. Wrap each tool group in Skill class
-3. Update workflow to use registry.getTools()
-4. Test with skills enabled/disabled
-
-**Acceptance Criteria**:
-- [ ] All existing tools converted to skills
-- [ ] No functionality regression
-- [ ] Skills can be disabled individually
-- [ ] Manifest files properly describe each skill
-
----
-
-#### Task 2.1.3: Skill Configuration UI
-
-**Scope**: Dashboard for managing skills
-
-**Files to create**:
-- `frontend/src/app/skills/page.tsx`
-- `frontend/src/components/SkillCard.tsx`
-- `frontend/src/components/SkillConfig.tsx`
-- `frontend/src/app/api/skills/route.ts`
-- `frontend/src/app/api/skills/[name]/route.ts`
-
-**API Routes**:
+**API Endpoints** (Orchestrator port 3002):
 ```
-GET    /api/skills           # List all skills with status
-POST   /api/skills/{name}    # Enable skill
-DELETE /api/skills/{name}    # Disable skill
-PUT    /api/skills/{name}    # Update skill config
+GET    /skills              # List all skills
+GET    /skills/:skillId     # Get skill details
+POST   /skills/:skillId/enable  # Enable skill
+POST   /skills/:skillId/disable # Disable skill
+PUT    /skills/:skillId/config  # Update config
 ```
 
-**UI Features**:
-- Skill cards with enable/disable toggle
-- Configuration modal for skill settings
-- Health status indicator
-- Tool list preview
+#### Follow-up Improvements (All Completed)
 
-**Acceptance Criteria**:
-- [ ] All skills visible in dashboard
-- [ ] Enable/disable with immediate effect
-- [ ] Configuration persisted to Redis
-- [ ] Health check visible per skill
+| Improvement | Description |
+|-------------|-------------|
+| Execution timeout | 5s timeout with `withTimeout` helper; timed-out skills marked unhealthy |
+| Unit tests | 25 tests in `skills/__tests__/registry.test.ts` |
+| Unified manifest source | Frontend proxies to orchestrator API (removed hardcoded manifests) |
+| Skill ID validation | Type-safe validation in orchestrator endpoints |
 
----
+#### Task 2.1.4: External Skill Loading (Deferred)
 
-#### Task 2.1.4: External Skill Loading
+**Status**: Deferred to future phase
 
-**Scope**: Load skills from filesystem (user-defined)
+**Requires**:
+- Secure sandboxed execution (vm2 or isolated-vm)
+- Filesystem watcher for hot reload
+- Schema validation for manifests
+- Security review of permission model
 
-**Files to modify**:
-- `services/orchestrator/src/skills/loader.ts`
-- `services/orchestrator/src/skills/registry.ts`
-
-**Skill Directory Structure**:
-```
-~/.secondme/skills/
-├── my-custom-skill/
-│   ├── manifest.json
-│   ├── index.ts
-│   └── package.json
-```
-
-**Loader Logic**:
-1. Scan skills directory on startup
-2. Validate manifest schema
-3. Check permissions/capabilities
-4. Register with SkillRegistry
-
-**Acceptance Criteria**:
-- [ ] Skills loaded from configurable directory
-- [ ] Invalid manifests logged and skipped
-- [ ] Hot-reload on file change (optional)
-- [ ] Sandboxed execution (no require access outside skill dir)
+For now, only built-in skills are supported
 
 ---
 
