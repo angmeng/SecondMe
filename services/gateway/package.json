@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest",
-    "test:watch": "vitest watch"
+    "test:watch": "vitest watch",
+    "migrate:pairing": "tsx src/scripts/migrate-existing-contacts.ts"
   },
   "dependencies": {
     "@secondme/shared-types": "*",

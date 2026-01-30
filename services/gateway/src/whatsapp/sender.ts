@@ -225,7 +225,7 @@ export class MessageSender {
       // Disable sendSeen for group chats to avoid whatsapp-web.js bug
       const isGroupChat = contactId.endsWith('@g.us');
       const message = await this.client.sendMessage(contactId, media, {
-        caption,
+        ...(caption !== undefined && { caption }),
         sendSeen: !isGroupChat,
       });
 
