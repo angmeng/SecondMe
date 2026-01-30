@@ -103,12 +103,18 @@ WhatsApp ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `RATE:{contactId}` - Rate limit counter
 - `PERSONA:{id}` - Cached persona (30-min TTL)
 - `HISTORY:{contactId}` - Conversation history for RAG context (configurable TTL)
+- `PAIRING:pending:{contactId}` - Pending pairing request (no TTL)
+- `PAIRING:approved:{contactId}` - Approved contact record (no TTL)
+- `PAIRING:denied:{contactId}` - Denied contact with cooldown (24h TTL)
+- `SKILLS:enabled` - Set of enabled skill IDs (no TTL)
+- `SKILLS:config:{skillId}` - JSON config per skill (no TTL)
 
 ### Environment Variables
 Required in `.env`:
 - `ANTHROPIC_API_KEY` - Claude API access
 - `FALKORDB_PASSWORD` - Graph database auth
 - `NODE_ENV` - development/production
+- `USE_SKILL_SYSTEM` - Enable skill-based context retrieval (`true` to enable)
 
 ## Environment Setup
 
@@ -174,6 +180,33 @@ docker compose up -d
 **Next.js 16**: Route params are async → `const { id } = await params`
 
 **LangGraph 1.0**: Stable API, `toolsCondition` undeprecated
+
+## Skill System
+
+The orchestrator uses a skill-based architecture for context retrieval. Skills are **context providers** that execute during message processing and return structured data for the Claude prompt.
+
+### Built-in Skills
+
+| Skill | Description |
+|-------|-------------|
+| `knowledge-graph` | Retrieves context from FalkorDB (people, topics, events) |
+| `persona` | Gets persona style guide based on relationship type |
+| `style-profile` | Retrieves communication style profile |
+| `conversation-history` | Gets recent conversation with keyword chunking |
+
+### Skill API (Orchestrator port 3002)
+
+```
+GET    /skills              # List all skills with status
+GET    /skills/:skillId     # Get skill details
+POST   /skills/:skillId/enable  # Enable skill
+POST   /skills/:skillId/disable # Disable skill
+PUT    /skills/:skillId/config  # Update skill configuration
+```
+
+### Feature Flag
+
+Set `USE_SKILL_SYSTEM=true` in `.env` to enable. When disabled, falls back to legacy `graphAndPersonaNode` function.
 
 ## Testing Strategy
 
