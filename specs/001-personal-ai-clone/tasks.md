@@ -278,7 +278,34 @@ This is a web application with microservices architecture:
 
 ---
 
-## Phase 7: Polish & Cross-Cutting Concerns
+## Phase 7: Security Hardening (Moltbot Learnings) ✅ COMPLETE
+
+**Purpose**: Contact pairing/approval system and security audit logging based on moltbot research findings
+**Completed**: 2026-01-31
+
+### Epic 1.1: Contact Pairing Mode
+
+- [X] T135 [P] Create pairing types at packages/shared-types/src/pairing.ts with ContactTier, PairingStatus, interfaces
+- [X] T136 [P] Create runtime type guards at packages/shared-types/src/guards.ts for PairingRequest, ApprovedContact, DeniedContact
+- [X] T137 Create pairing store at services/gateway/src/redis/pairing-store.ts with Lua scripts for atomic operations
+- [X] T138 Update message handler at services/gateway/src/whatsapp/message-handler.ts with pairing gate before history storage
+- [X] T139 [P] Create pairing dashboard page at frontend/src/app/pairing/page.tsx with tabs for pending/approved
+- [X] T140 [P] Create PairingRequests component at frontend/src/components/PairingRequests.tsx with real-time Socket.io
+- [X] T141 [P] Create ApprovedContacts component at frontend/src/components/ApprovedContacts.tsx with search/filter
+- [X] T142 Create pairing API routes at frontend/src/app/api/pairing/ (list, approve, deny, revoke - 7 routes total)
+- [X] T143 Create migration script at services/gateway/src/scripts/migrate-existing-contacts.ts using SCAN iterator
+
+### Epic 1.2: Security Audit System
+
+- [X] T144 [P] Create security event types at packages/shared-types/src/security.ts with SecurityEventType, ContentFlagType
+- [X] T145 Extend logger at services/gateway/src/utils/logger.ts with security file transport and masking helpers
+- [X] T146 Create content analyzer at services/gateway/src/utils/content-analyzer.ts with 5 detectors (URL, control chars, length, repetition, injection)
+- [X] T147 [P] Create gitleaks config at .gitleaks.toml with Anthropic/OpenAI API key patterns
+- [X] T148 [P] Create security workflow at .github/workflows/security.yml with gitleaks and npm audit
+
+---
+
+## Phase 8: Polish & Cross-Cutting Concerns
 
 **Purpose**: Improvements, security hardening, and production readiness that affect multiple user stories
 

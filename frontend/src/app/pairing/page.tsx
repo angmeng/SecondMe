@@ -97,9 +97,9 @@ export default function PairingPage() {
               <div>
                 <h3 className="font-medium text-blue-800 dark:text-blue-300">How Pairing Works</h3>
                 <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">
-                  When unknown contacts message the bot, they receive a 6-digit verification code.
-                  You can approve or deny their access here. Approved contacts can chat freely;
-                  denied contacts enter a 24-hour cooldown.
+                  When unknown contacts message the bot, they appear here as pending requests.
+                  You can approve or deny their access directly from this dashboard. Approved
+                  contacts can chat freely; denied contacts enter a 24-hour cooldown.
                 </p>
               </div>
             </div>

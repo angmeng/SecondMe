@@ -64,7 +64,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       // No body or invalid JSON, that's okay
     }
 
-    await redisClient.denyContact(contactId, 'dashboard-admin', reason);
+    await redisClient.denyContact(contactId, 'dashboard-admin', reason); // TODO: Add actual user auth
 
     return NextResponse.json({
       success: true,

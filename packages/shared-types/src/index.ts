@@ -37,6 +37,9 @@ export {
   isPairingRequest,
   isApprovedContact,
   isDeniedContact,
+  isSkillConfigField,
+  isSkillManifest,
+  isSkillInfo,
 } from './guards.js';
 
 // Security types
@@ -49,3 +52,17 @@ export type {
   ContentFlag,
   ContentAnalysis,
 } from './security.js';
+
+// Skill types
+export type {
+  SkillPermission,
+  SkillHealthStatus,
+  SkillConfigField,
+  SkillManifest,
+  SkillExecutionContext,
+  SkillExecutionResult,
+  SkillInfo,
+  SkillsConfig,
+} from './skills.js';
+
+export { DEFAULT_SKILLS_CONFIG } from './skills.js';

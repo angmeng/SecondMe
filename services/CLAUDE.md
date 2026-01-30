@@ -79,7 +79,7 @@ Orchestrates AI workflow using LangGraph, manages Claude API calls, and retrieve
 |------|----------------|
 | `langgraph/workflow.ts` | Main StateGraph workflow definition |
 | `langgraph/router-node.ts` | Phatic vs substantive routing |
-| `langgraph/graph-node.ts` | FalkorDB context retrieval node |
+| `langgraph/graph-node.ts` | FalkorDB context retrieval node, skill-based retrieval |
 | `anthropic/haiku-client.ts` | Claude Haiku for classification |
 | `anthropic/sonnet-client.ts` | Claude Sonnet with prompt caching |
 | `anthropic/prompt-templates.ts` | System prompts, persona templates |
@@ -89,6 +89,9 @@ Orchestrates AI workflow using LangGraph, manages Claude API calls, and retrieve
 | `falkordb/queries.ts` | Cypher query builders |
 | `hts/delay-calculator.ts` | Typing delay calculation |
 | `hts/sleep-hours.ts` | Sleep hours enforcement |
+| `skills/registry.ts` | Skill lifecycle management and execution |
+| `skills/base-skill.ts` | Abstract base class for skills |
+| `skills/built-in/*.ts` | Built-in skills (knowledge-graph, persona, etc.) |
 
 ### LangGraph Workflow Pattern
 ```typescript
@@ -155,6 +158,52 @@ Types are defined in `@secondme/shared-types` package:
 - `ConversationMessage` - Claude API format
 - `HistoryConfig` - Feature configuration
 - `ConversationChunk` - Grouped message chunk
+
+### Skill System
+
+The orchestrator uses a skill-based architecture for context retrieval. Enable with `USE_SKILL_SYSTEM=true` in `.env`.
+
+**Built-in Skills:**
+| Skill | Description |
+|-------|-------------|
+| `knowledge-graph` | Retrieves context from FalkorDB (people, topics, events) |
+| `persona` | Gets persona style guide based on relationship type |
+| `style-profile` | Retrieves communication style profile |
+| `conversation-history` | Gets recent conversation with keyword chunking |
+
+**Skill Registry:**
+```typescript
+// Skills execute during context retrieval
+const skillResults = await skillRegistry.executeAll({
+  contactId: state.contactId,
+  messageContent: state.content,
+  relationshipType,
+});
+
+// Results provide structured data for Claude prompt
+const graphContext = skillResults.find(r => r.data?.graphContext)?.data;
+const persona = skillResults.find(r => r.data?.persona)?.data;
+```
+
+**Redis Keys:**
+```
+SKILLS:enabled           # Set of enabled skill IDs
+SKILLS:config:{skillId}  # JSON config per skill
+```
+
+**API Endpoints (port 3002):**
+```
+GET    /skills              # List all skills
+GET    /skills/:skillId     # Get skill details
+POST   /skills/:skillId/enable  # Enable skill
+POST   /skills/:skillId/disable # Disable skill
+PUT    /skills/:skillId/config  # Update config
+```
+
+**Adding New Skills:**
+1. Create skill class extending `BaseSkill` in `skills/built-in/`
+2. Implement `execute()` to return `SkillExecutionResult`
+3. Register in `skills/index.ts` via `registerBuiltInSkills()`
 
 ## Graph Worker Service
 
