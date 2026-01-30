@@ -1,11 +1,13 @@
 /**
  * Logger Utility
  * T116: Structured logging with winston for error handling and debugging
+ * Extended with security event logging for pairing and content analysis
  */
 
 import winston from 'winston';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import type { SecurityEventType, SecuritySeverity } from '@secondme/shared-types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,10 +40,11 @@ const transports: winston.transport[] = [
   }),
 ];
 
+// Logs directory for file transports
+const logsDir = resolve(__dirname, '../../../../logs');
+
 // Add file transports in production
 if (NODE_ENV === 'production') {
-  const logsDir = resolve(__dirname, '../../../../logs');
-
   transports.push(
     // Error log
     new winston.transports.File({
@@ -60,6 +63,20 @@ if (NODE_ENV === 'production') {
     })
   );
 }
+
+// Security event log transport (always enabled)
+// Logs security-relevant events to a separate file for audit trails
+const securityTransport = new winston.transports.File({
+  filename: resolve(logsDir, 'security.jsonl'),
+  level: 'info',
+  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  maxsize: 10 * 1024 * 1024, // 10MB
+  maxFiles: 30, // Keep 30 days
+  tailable: true,
+});
+
+// Add security transport to the transports array
+transports.push(securityTransport);
 
 // Create logger instance
 const logger = winston.createLogger({
@@ -148,6 +165,102 @@ export function logSocketEvent(
   logger.debug(`Socket: ${event}`, {
     socketId,
     ...details,
+  });
+}
+
+/**
+ * Mask contact ID for privacy in logs
+ * Shows first 4 and last 2 digits: 1234****89@c.us
+ */
+function maskContactId(contactId: string): string {
+  const phone = contactId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+  if (phone.length <= 6) return contactId;
+  const suffix = contactId.endsWith('@c.us') ? '@c.us' : '@s.whatsapp.net';
+  return phone.slice(0, 4) + '****' + phone.slice(-2) + suffix;
+}
+
+/**
+ * Log a security event
+ * Security events are logged to a separate file for audit purposes
+ *
+ * @param event - Type of security event
+ * @param severity - Event severity (debug, info, warn, error)
+ * @param contactId - Optional contact ID (will be masked in logs)
+ * @param details - Additional event-specific details
+ */
+export function logSecurityEvent(
+  event: SecurityEventType,
+  severity: SecuritySeverity = 'info',
+  contactId?: string,
+  details?: Record<string, unknown>
+): void {
+  const logData = {
+    category: 'security',
+    event,
+    contactId: contactId ? maskContactId(contactId) : undefined,
+    ...details,
+  };
+
+  // Log to appropriate level
+  switch (severity) {
+    case 'debug':
+      logger.debug(`Security: ${event}`, logData);
+      break;
+    case 'info':
+      logger.info(`Security: ${event}`, logData);
+      break;
+    case 'warn':
+      logger.warn(`Security: ${event}`, logData);
+      break;
+    case 'error':
+      logger.error(`Security: ${event}`, logData);
+      break;
+  }
+}
+
+/**
+ * Log a pairing-related security event
+ * Convenience wrapper for common pairing events
+ */
+type PairingAction = 'request' | 'approved' | 'denied' | 'code_attempt' | 'revoked';
+
+const PAIRING_EVENT_MAP: Record<PairingAction, SecurityEventType> = {
+  request: 'pairing_request',
+  approved: 'pairing_approved',
+  denied: 'pairing_denied',
+  code_attempt: 'pairing_code_attempt',
+  revoked: 'pairing_revoked',
+};
+
+const PAIRING_SEVERITY_MAP: Record<PairingAction, SecuritySeverity> = {
+  request: 'info',
+  approved: 'info',
+  denied: 'warn',
+  code_attempt: 'info',
+  revoked: 'warn',
+};
+
+export function logPairingEvent(
+  action: PairingAction,
+  contactId: string,
+  details?: Record<string, unknown>
+): void {
+  logSecurityEvent(PAIRING_EVENT_MAP[action], PAIRING_SEVERITY_MAP[action], contactId, details);
+}
+
+/**
+ * Log suspicious content detection
+ */
+export function logSuspiciousContent(
+  contactId: string,
+  flags: Array<{ type: string; details: string }>,
+  riskScore: number,
+  preview?: string
+): void {
+  logSecurityEvent('suspicious_content', 'warn', contactId, {
+    flags,
+    riskScore,
+    preview: preview ? preview.slice(0, 100) : undefined,
   });
 }
 

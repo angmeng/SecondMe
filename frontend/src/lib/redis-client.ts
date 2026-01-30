@@ -1,9 +1,10 @@
 /**
  * Redis Client for Server Actions
- * Used by Next.js Server Actions to interact with Redis for pause controls
+ * Used by Next.js Server Actions to interact with Redis for pause controls and pairing
  */
 
 import Redis from 'ioredis';
+import type { PairingRequest, ApprovedContact, ContactTier } from '@secondme/shared-types';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
@@ -311,6 +312,243 @@ class RedisClient {
       this.isInitialized = false;
       console.log('[Frontend Redis] Redis connection closed');
     }
+  }
+
+  // ============================================================
+  // Pairing Methods
+  // ============================================================
+
+  /**
+   * List pending pairing requests
+   */
+  async listPendingPairingRequests(limit: number = 100): Promise<PairingRequest[]> {
+    await this.ensureConnected();
+
+    const requests: PairingRequest[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        'PAIRING:pending:*',
+        'COUNT',
+        100
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        const values = await this.client.mget(keys);
+        for (const json of values) {
+          if (json) {
+            try {
+              const parsed = JSON.parse(json);
+              // Basic validation
+              if (parsed && parsed.contactId && parsed.code) {
+                requests.push(parsed as PairingRequest);
+              }
+            } catch {
+              // Skip invalid entries
+            }
+          }
+        }
+      }
+
+      if (requests.length >= limit) break;
+    } while (cursor !== '0');
+
+    // Sort by requestedAt descending (newest first)
+    return requests.slice(0, limit).sort((a, b) => b.requestedAt - a.requestedAt);
+  }
+
+  /**
+   * List approved contacts
+   */
+  async listApprovedContacts(limit: number = 1000): Promise<ApprovedContact[]> {
+    await this.ensureConnected();
+
+    const contacts: ApprovedContact[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        'PAIRING:approved:*',
+        'COUNT',
+        100
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        const values = await this.client.mget(keys);
+        for (const json of values) {
+          if (json) {
+            try {
+              const parsed = JSON.parse(json);
+              // Basic validation
+              if (parsed && parsed.contactId && parsed.approvedAt) {
+                contacts.push(parsed as ApprovedContact);
+              }
+            } catch {
+              // Skip invalid entries
+            }
+          }
+        }
+      }
+
+      if (contacts.length >= limit) break;
+    } while (cursor !== '0');
+
+    // Sort by approvedAt descending (newest first)
+    return contacts.slice(0, limit).sort((a, b) => b.approvedAt - a.approvedAt);
+  }
+
+  /**
+   * Get pending pairing request for a contact
+   */
+  async getPendingRequest(contactId: string): Promise<PairingRequest | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`PAIRING:pending:${contactId}`);
+    if (!json) return null;
+
+    try {
+      return JSON.parse(json) as PairingRequest;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get approved contact record
+   */
+  async getApprovedContact(contactId: string): Promise<ApprovedContact | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`PAIRING:approved:${contactId}`);
+    if (!json) return null;
+
+    try {
+      return JSON.parse(json) as ApprovedContact;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Approve a contact (admin action)
+   */
+  async approveContact(
+    contactId: string,
+    approvedBy: string,
+    tier: ContactTier = 'standard',
+    notes?: string
+  ): Promise<ApprovedContact> {
+    await this.ensureConnected();
+
+    // Get pending request to preserve contact info
+    const pending = await this.getPendingRequest(contactId);
+
+    const now = Date.now();
+    const approved: ApprovedContact = {
+      contactId,
+      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      ...(pending?.displayName && { displayName: pending.displayName }),
+      ...(pending?.profilePicUrl && { profilePicUrl: pending.profilePicUrl }),
+      approvedAt: now,
+      approvedBy,
+      tier,
+      ...(notes && { notes }),
+    };
+
+    // Set approved (no TTL - permanent)
+    await this.client.set(`PAIRING:approved:${contactId}`, JSON.stringify(approved));
+
+    // Delete pending request and code lookup if exists
+    if (pending) {
+      await this.client.del(`PAIRING:pending:${contactId}`);
+      await this.client.del(`PAIRING:codes:${pending.code}`);
+    }
+
+    console.log(`[Frontend Redis] Contact ${contactId} approved by ${approvedBy} (tier: ${tier})`);
+
+    return approved;
+  }
+
+  /**
+   * Deny a contact (admin action) - sets cooldown period
+   */
+  async denyContact(
+    contactId: string,
+    deniedBy: string,
+    reason?: string,
+    cooldownHours: number = 24
+  ): Promise<void> {
+    await this.ensureConnected();
+
+    const pending = await this.getPendingRequest(contactId);
+
+    const now = Date.now();
+    const expiresAt = now + cooldownHours * 60 * 60 * 1000;
+    const ttlSeconds = cooldownHours * 60 * 60;
+
+    const denied = {
+      contactId,
+      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      ...(pending?.displayName && { displayName: pending.displayName }),
+      deniedAt: now,
+      deniedBy,
+      ...(reason && { reason }),
+      expiresAt,
+    };
+
+    // Set denied with TTL
+    await this.client.setex(`PAIRING:denied:${contactId}`, ttlSeconds, JSON.stringify(denied));
+
+    // Delete pending request and code lookup if exists
+    if (pending) {
+      await this.client.del(`PAIRING:pending:${contactId}`);
+      await this.client.del(`PAIRING:codes:${pending.code}`);
+    }
+
+    console.log(
+      `[Frontend Redis] Contact ${contactId} denied by ${deniedBy} (cooldown: ${cooldownHours}h)`
+    );
+  }
+
+  /**
+   * Revoke approval (admin action)
+   */
+  async revokeApproval(contactId: string): Promise<void> {
+    await this.ensureConnected();
+    await this.client.del(`PAIRING:approved:${contactId}`);
+    console.log(`[Frontend Redis] Approval revoked for ${contactId}`);
+  }
+
+  /**
+   * Update approved contact tier
+   */
+  async updateContactTier(contactId: string, tier: ContactTier): Promise<ApprovedContact | null> {
+    await this.ensureConnected();
+
+    const contact = await this.getApprovedContact(contactId);
+    if (!contact) return null;
+
+    contact.tier = tier;
+    await this.client.set(`PAIRING:approved:${contactId}`, JSON.stringify(contact));
+
+    console.log(`[Frontend Redis] Updated tier for ${contactId} to ${tier}`);
+    return contact;
+  }
+
+  /**
+   * Check if contact is approved
+   */
+  async isContactApproved(contactId: string): Promise<boolean> {
+    await this.ensureConnected();
+    const exists = await this.client.exists(`PAIRING:approved:${contactId}`);
+    return exists === 1;
   }
 }
 

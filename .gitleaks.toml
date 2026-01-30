@@ -1,0 +1,80 @@
+# Gitleaks Configuration for SecondMe
+# Prevents accidental commit of secrets and API keys
+# See: https://github.com/gitleaks/gitleaks
+
+title = "SecondMe Secret Detection"
+
+[extend]
+# Use default gitleaks rules as base
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+paths = [
+  # Lock files (contain hashes, not secrets)
+  '''package-lock\.json$''',
+  '''pnpm-lock\.yaml$''',
+  '''yarn\.lock$''',
+
+  # Example/template files
+  '''\.env\.example$''',
+  '''\.env\.template$''',
+
+  # Documentation files
+  '''\.md$''',
+  '''CLAUDE\.md$''',
+
+  # Test fixtures
+  '''__tests__/.*\.ts$''',
+  '''\.test\.ts$''',
+  '''\.spec\.ts$''',
+
+  # Mocks
+  '''__mocks__/.*''',
+]
+
+# Custom rules for SecondMe-specific patterns
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API Key"
+regex = '''sk-ant-[a-zA-Z0-9-_]{80,}'''
+tags = ["api-key", "anthropic"]
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "anthropic-api-key-short"
+description = "Anthropic API Key (shorter format)"
+regex = '''sk-ant-api[a-zA-Z0-9-_]{20,}'''
+tags = ["api-key", "anthropic"]
+keywords = ["sk-ant-api"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key"
+regex = '''sk-[a-zA-Z0-9]{48,}'''
+tags = ["api-key", "openai"]
+keywords = ["sk-"]
+# Avoid matching Anthropic keys
+[rules.allowlist]
+regexes = ['''sk-ant-''']
+
+[[rules]]
+id = "redis-password"
+description = "Redis Password in connection string"
+regex = '''redis://[^:]+:([^@]+)@'''
+tags = ["database", "redis"]
+keywords = ["redis://"]
+
+[[rules]]
+id = "falkordb-password"
+description = "FalkorDB/Redis Graph password"
+regex = '''FALKORDB_PASSWORD\s*=\s*["']?([^"'\s]+)["']?'''
+tags = ["database", "falkordb"]
+keywords = ["FALKORDB_PASSWORD"]
+
+[[rules]]
+id = "whatsapp-session"
+description = "WhatsApp session data"
+regex = '''WABrowserId|WASecretBundle|WAToken'''
+tags = ["whatsapp", "session"]
+keywords = ["WABrowserId", "WASecretBundle", "WAToken"]

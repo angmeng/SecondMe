@@ -292,8 +292,8 @@ async function startGatewayService() {
     // Initialize handlers after WhatsApp client is ready
     const client = whatsappClient.getClient();
     authHandler = new AuthHandler(client);
-    _messageHandler = new MessageHandler(client);
     messageSender = new MessageSender(client);
+    _messageHandler = new MessageHandler(client, messageSender);
     sessionManager = new SessionManager(client);
     _socketEmitter = new SocketEventEmitter(io);
 

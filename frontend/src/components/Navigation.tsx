@@ -47,6 +47,20 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    href: '/pairing',
+    label: 'Pairing',
+    icon: (
+      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+        />
+      </svg>
+    ),
+  },
+  {
     href: '/auth',
     label: 'Authentication',
     icon: (
@@ -71,12 +85,11 @@ export default function Navigation() {
   const router = useRouter();
   const { toast, dismiss } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
-  const initialStatus = socketClient.getLastConnectionStatus();
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(initialStatus);
-  const [isDarkMode, setIsDarkMode] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : false
-  );
-  const prevStatusRef = useRef<ConnectionStatus>(initialStatus);
+  // Initialize with consistent 'disconnected' to avoid hydration mismatch
+  // The actual status is set in useEffect after mount
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const prevStatusRef = useRef<ConnectionStatus>('disconnected');
   const hoverTimeoutRef = useRef<NodeJS.Timeout>(null);
 
   // Handle sidebar hover with delay
@@ -97,11 +110,18 @@ export default function Navigation() {
   }
 
   useEffect(() => {
-    // Check for dark mode preference
+    // Set initial connection status from socket client (after mount to avoid hydration mismatch)
+    const initialStatus = socketClient.getLastConnectionStatus();
+    setConnectionStatus(initialStatus);
+    prevStatusRef.current = initialStatus;
+
+    // Check for dark mode preference (after mount to avoid hydration mismatch)
     const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const prefersDark = darkModeMediaQuery.matches;
+    setIsDarkMode(prefersDark);
 
     // Apply dark class to html element based on initial state
-    if (isDarkMode) {
+    if (prefersDark) {
       document.documentElement.classList.add('dark');
     }
 
