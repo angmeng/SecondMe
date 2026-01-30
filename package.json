@@ -24,7 +24,9 @@
     "licenses:check": "license-checker --summary --failOn 'AGPL;GPL;LGPL' --excludePrivatePackages",
     "licenses:report": "license-checker --json --out licenses.json --excludePrivatePackages",
     "backup:db": "./scripts/backup-falkordb.sh",
-    "precommit": "npm run lint && npm run type-check && npm run licenses:check"
+    "precommit": "npm run lint && npm run type-check && npm run licenses:check",
+    "secrets:scan": "gitleaks detect --source . --verbose",
+    "secrets:scan:staged": "gitleaks protect --staged --verbose"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
