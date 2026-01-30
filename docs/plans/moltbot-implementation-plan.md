@@ -1,8 +1,9 @@
 # Moltbot Implementation Plan for SecondMe
 
 **Created**: 2026-01-30
+**Updated**: 2026-01-30
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Draft
+**Status**: Reviewed
 
 ---
 
@@ -49,37 +50,58 @@ export interface PairingRequest {
   contactId: string;
   phoneNumber: string;
   displayName?: string;
-  code: string;            // 6-digit code
-  requestedAt: number;     // Unix timestamp
+  profilePicUrl?: string;    // For dashboard display
+  channelId?: string;        // 'whatsapp', 'telegram' - future multi-channel
+  code: string;              // 6-digit code
+  requestedAt: number;       // Unix timestamp
   status: 'pending' | 'approved' | 'denied' | 'expired';
-  approvedBy?: string;     // Admin identifier
+  approvedBy?: string;       // Admin identifier
   approvedAt?: number;
-  expiresAt: number;       // Auto-expire pending requests
+  expiresAt: number;         // Auto-expire pending requests
 }
 
 export interface ApprovedContact {
   contactId: string;
   phoneNumber: string;
   displayName?: string;
+  profilePicUrl?: string;
+  channelId?: string;        // Future multi-channel support
   approvedAt: number;
   approvedBy: string;
   tier: 'trusted' | 'standard' | 'restricted';
   notes?: string;
 }
 
+export interface DeniedContact {
+  contactId: string;
+  phoneNumber: string;
+  displayName?: string;
+  deniedAt: number;
+  deniedBy: string;
+  reason?: string;
+  expiresAt: number;         // Allow re-pairing after cooldown (24h)
+}
+
 export interface PairingConfig {
   enabled: boolean;
   codeLength: number;           // Default: 6
   codeExpirationMinutes: number; // Default: 30
+  denialCooldownHours: number;  // Default: 24
   maxPendingRequests: number;   // Default: 100
   autoApproveExisting: boolean; // Auto-approve contacts with history
 }
+
+// Runtime type guards (following isStoredMessage pattern)
+export function isPairingRequest(obj: unknown): obj is PairingRequest;
+export function isApprovedContact(obj: unknown): obj is ApprovedContact;
+export function isDeniedContact(obj: unknown): obj is DeniedContact;
 ```
 
 **Acceptance Criteria**:
 - [ ] Types exported from shared-types package
-- [ ] Type guards for runtime validation
+- [ ] Runtime type guards for validation (following `isStoredMessage` pattern)
 - [ ] Unit tests for type guards
+- [ ] `channelId` field included for future multi-channel support
 
 ---
 
@@ -95,21 +117,33 @@ export interface PairingConfig {
 ```
 PAIRING:pending:{contactId}     # PairingRequest JSON, TTL: 30 min
 PAIRING:approved:{contactId}    # ApprovedContact JSON, no TTL
+PAIRING:denied:{contactId}      # DeniedContact JSON, TTL: 24 hours
 PAIRING:codes:{code}            # contactId lookup, TTL: 30 min
-PAIRING:stats                   # Hash: pending_count, approved_count
+PAIRING:stats                   # Hash: pending_count, approved_count, denied_count
 ```
 
 **Deliverables**:
 ```typescript
 // services/gateway/src/redis/pairing-store.ts
+import { randomInt } from 'crypto';  // CRITICAL: Use crypto-safe random
+
 export class PairingStore {
   constructor(redis: Redis, config: PairingConfig);
 
   // Create pairing request for unknown contact
-  async createPairingRequest(contactId: string, phoneNumber: string, displayName?: string): Promise<PairingRequest>;
+  // Uses Lua script for atomic operation (following history-store.ts pattern)
+  async createPairingRequest(
+    contactId: string,
+    phoneNumber: string,
+    displayName?: string,
+    profilePicUrl?: string
+  ): Promise<PairingRequest>;
 
   // Check if contact is approved
   async isApproved(contactId: string): Promise<boolean>;
+
+  // Check if contact is denied (in cooldown period)
+  async isDenied(contactId: string): Promise<boolean>;
 
   // Get pending request
   async getPendingRequest(contactId: string): Promise<PairingRequest | null>;
@@ -117,8 +151,11 @@ export class PairingStore {
   // Approve contact (admin action)
   async approveContact(contactId: string, approvedBy: string, tier?: Tier): Promise<ApprovedContact>;
 
-  // Deny contact (admin action)
-  async denyContact(contactId: string): Promise<void>;
+  // Deny contact (admin action) - sets 24h cooldown
+  async denyContact(contactId: string, deniedBy: string, reason?: string): Promise<void>;
+
+  // Revoke approval (admin action)
+  async revokeApproval(contactId: string): Promise<void>;
 
   // Verify code submitted by contact
   async verifyCode(contactId: string, code: string): Promise<boolean>;
@@ -128,13 +165,41 @@ export class PairingStore {
 
   // List approved contacts
   async listApproved(limit?: number): Promise<ApprovedContact[]>;
+
+  // Generate secure 6-digit code
+  private generateCode(): string {
+    // CRITICAL: Use crypto.randomInt() not Math.random()
+    return randomInt(100000, 999999).toString();
+  }
 }
 ```
 
+**Lua Script for Atomic Create** (following `history-store.ts:84-157` pattern):
+```lua
+-- Atomic pairing request creation
+-- Checks: not already approved, not denied (cooldown), no existing pending
+-- Creates: pending request + code lookup
+local approved = redis.call('EXISTS', KEYS[1])  -- PAIRING:approved:{contactId}
+local denied = redis.call('EXISTS', KEYS[2])    -- PAIRING:denied:{contactId}
+local pending = redis.call('EXISTS', KEYS[3])   -- PAIRING:pending:{contactId}
+
+if approved == 1 then return {0, 'already_approved'} end
+if denied == 1 then return {0, 'denied_cooldown'} end
+if pending == 1 then return {0, 'already_pending'} end
+
+-- Check code collision, regenerate if needed (handled in TypeScript)
+redis.call('SET', KEYS[3], ARGV[1], 'EX', ARGV[2])  -- pending request
+redis.call('SET', KEYS[4], ARGV[3], 'EX', ARGV[2])  -- code lookup
+return {1, 'created'}
+```
+
 **Acceptance Criteria**:
-- [ ] All Redis operations atomic where needed
-- [ ] TTL correctly applied to pending requests
+- [ ] All Redis operations atomic using Lua scripts
+- [ ] TTL correctly applied to pending requests (30 min)
+- [ ] TTL correctly applied to denied contacts (24 hours)
+- [ ] Code generation uses `crypto.randomInt()` (not `Math.random()`)
 - [ ] Code collision prevention (regenerate if exists)
+- [ ] `revokeApproval()` method for admin to revoke access
 - [ ] Unit tests with Redis mock
 
 ---
@@ -146,36 +211,122 @@ export class PairingStore {
 **Files to modify**:
 - `services/gateway/src/whatsapp/message-handler.ts`
 - `services/gateway/src/whatsapp/sender.ts`
+- `services/gateway/src/redis/persona-cache.ts` (for persona name)
 
 **Flow Change**:
 ```
-Before:
-  Message → isPaused? → isRateLimited? → QUEUE:messages
+Before (message-handler.ts:46-115):
+  Message → Skip groups → Store history → isPaused? → isRateLimited? → QUEUE:messages
 
 After:
-  Message → isApproved? → [NO: sendPairingPrompt]
-                        → [YES: isPaused? → isRateLimited? → QUEUE:messages]
+  Message → Skip groups → isApproved? → [NO: handleUnapprovedContact()]
+                                       → [YES: Store history → isPaused? → isRateLimited? → QUEUE:messages]
+```
+
+**CRITICAL**: Move history storage AFTER pairing approval check. Do not store messages from unapproved contacts.
+
+**Insertion Point** (after line 65, before history store):
+```typescript
+// Pairing gate - check before storing history
+const isApproved = await pairingStore.isApproved(contactId);
+if (!isApproved) {
+  await this.handleUnapprovedContact(message, contactId, contactName);
+  return;  // Don't store history, don't queue
+}
+
+// Only store history for approved contacts
+await historyStore.addMessage(contactId, storedMessage);
+```
+
+**Code Submission Detection**:
+```typescript
+private async handleUnapprovedContact(message: Message, contactId: string, contactName?: string): Promise<void> {
+  const content = message.body.trim();
+
+  // Check if message is a 6-digit code submission
+  const codePattern = /^\d{6}$/;
+  if (codePattern.test(content)) {
+    const verified = await pairingStore.verifyCode(contactId, content);
+    if (verified) {
+      // Auto-approve on correct code
+      await pairingStore.approveContact(contactId, 'self-verified', 'standard');
+      io.emit('pairing_verified', { contactId, contactName });
+
+      // Send welcome message
+      await sender.sendMessage(contactId, 'Welcome! You can now chat with me.');
+      return;
+    } else {
+      // Wrong code
+      await sender.sendMessage(contactId, 'Invalid code. Please check and try again.');
+      return;
+    }
+  }
+
+  // Check if already has pending request (rate limit prompts)
+  const existingRequest = await pairingStore.getPendingRequest(contactId);
+  if (existingRequest && existingRequest.status === 'pending') {
+    // Don't spam with new codes - silently ignore
+    console.log(`[Pairing] Ignoring message from ${contactId} - pending request exists`);
+    return;
+  }
+
+  // Check if denied (in cooldown)
+  const isDenied = await pairingStore.isDenied(contactId);
+  if (isDenied) {
+    console.log(`[Pairing] Ignoring message from ${contactId} - in denial cooldown`);
+    return;
+  }
+
+  // Create new pairing request
+  const request = await pairingStore.createPairingRequest(
+    contactId,
+    message.from,
+    contactName,
+    await this.getProfilePic(message)
+  );
+
+  // Fetch persona name for personalized prompt
+  const persona = await personaCache.getActive();
+  const personaName = persona?.name || 'the owner';
+
+  // Send pairing prompt
+  await sender.sendPairingPrompt(contactId, request.code, personaName);
+
+  // Emit socket event for dashboard
+  io.emit('pairing_request', {
+    contactId,
+    contactName,
+    code: request.code,  // Masked in frontend
+    requestedAt: request.requestedAt,
+    expiresAt: request.expiresAt,
+  });
+}
 ```
 
 **Pairing Response Template**:
 ```
-Hi! I'm [PersonaName]'s AI assistant. To chat with me, please share this code
-with [PersonaName] for approval: **{CODE}**
+Hi! I'm {personaName}'s AI assistant. To chat with me, please share this code
+with {personaName} for approval: **{CODE}**
 
-This code expires in 30 minutes.
+This code expires in 30 minutes. Or reply with the code if you already have it.
 ```
 
 **Deliverables**:
-- Modified `handleIncomingMessage()` with pairing gate
+- Modified `handleIncomingMessage()` with pairing gate BEFORE history storage
+- New `handleUnapprovedContact()` method with code detection
 - New `sendPairingPrompt()` function in sender
-- Emit `pairing_request` socket event for dashboard
+- Emit `pairing_request` and `pairing_verified` socket events
 
 **Acceptance Criteria**:
 - [ ] Unknown contacts receive pairing code
 - [ ] Repeat messages from unknown contacts don't generate new codes (within TTL)
 - [ ] Approved contacts bypass pairing check
-- [ ] Code submission detected and verified
-- [ ] Socket event emitted for real-time dashboard update
+- [ ] Code submission detected via regex pattern `^\d{6}$`
+- [ ] Self-verification on correct code submission
+- [ ] History NOT stored for unapproved contacts
+- [ ] Denied contacts in cooldown are silently ignored
+- [ ] Socket events emitted for real-time dashboard update
+- [ ] Persona name injected into prompt
 
 ---
 
@@ -186,29 +337,71 @@ This code expires in 30 minutes.
 **Files to create/modify**:
 - `frontend/src/app/pairing/page.tsx` (new)
 - `frontend/src/components/PairingRequests.tsx` (new)
+- `frontend/src/components/ApprovedContacts.tsx` (new)
 - `frontend/src/app/api/pairing/route.ts` (new)
 - `frontend/src/app/api/pairing/[contactId]/route.ts` (new)
-- `frontend/src/components/Navigation.tsx` (add link)
+- `frontend/src/app/api/pairing/approved/route.ts` (new)
+- `frontend/src/components/Navigation.tsx` (add link with ShieldCheckIcon)
 
 **API Routes**:
 ```
-GET    /api/pairing           # List pending requests
-POST   /api/pairing/{id}      # Approve contact
-DELETE /api/pairing/{id}      # Deny contact
-GET    /api/pairing/approved  # List approved contacts
+GET    /api/pairing              # List pending requests
+POST   /api/pairing/{id}         # Approve contact (body: { tier, notes })
+DELETE /api/pairing/{id}         # Deny contact (body: { reason })
+GET    /api/pairing/approved     # List approved contacts
+DELETE /api/pairing/approved/{id} # Revoke approval
+POST   /api/pairing/bulk         # Bulk approve/deny (body: { action, contactIds })
+```
+
+**Socket.io Events to Handle**:
+```typescript
+// Listen for real-time updates (following pause_update pattern)
+socket.on('pairing_request', (data) => {
+  // Add to pending list
+});
+
+socket.on('pairing_verified', (data) => {
+  // Move from pending to approved, show success toast
+});
+
+socket.on('pairing_approved', (data) => {
+  // Move from pending to approved
+});
+
+socket.on('pairing_denied', (data) => {
+  // Remove from pending
+});
 ```
 
 **UI Components**:
-- Pending requests list with approve/deny buttons
-- Approved contacts list with tier management
-- Real-time updates via Socket.io
+
+1. **PairingRequests.tsx** - Pending requests list
+   - Contact avatar + name + phone
+   - Time since request + expiry countdown
+   - Approve button (opens tier selector)
+   - Deny button (opens reason input)
+   - "Approve All" bulk action
+
+2. **ApprovedContacts.tsx** - Approved contacts management
+   - Search by name/phone
+   - Filter by tier (trusted/standard/restricted)
+   - Edit tier button
+   - Revoke access button (with confirmation)
+
+3. **Navigation.tsx** - Add link
+   ```typescript
+   { name: 'Pairing', href: '/pairing', icon: ShieldCheckIcon }
+   ```
 
 **Acceptance Criteria**:
-- [ ] Pending requests shown in real-time
-- [ ] One-click approve/deny
+- [ ] Pending requests shown in real-time via Socket.io
+- [ ] One-click approve with tier selector dropdown
+- [ ] Deny with optional reason input
 - [ ] Success/error toast notifications
-- [ ] Approved contacts list with search
-- [ ] Tier assignment on approval
+- [ ] Approved contacts list with search and filter
+- [ ] Bulk approve/deny actions
+- [ ] Revoke approval with confirmation modal
+- [ ] Navigation link with shield icon
 
 ---
 
@@ -221,15 +414,97 @@ GET    /api/pairing/approved  # List approved contacts
 - `services/gateway/src/scripts/run-migration.ts`
 
 **Logic**:
-1. Scan all `HISTORY:*` keys
-2. Extract unique contactIds
-3. Create ApprovedContact entries with `tier: 'standard'`
-4. Set `approvedBy: 'migration'`
+```typescript
+// CRITICAL: Use SCAN iterator, not KEYS (KEYS blocks Redis on large datasets)
+async function migrateExistingContacts(options: { dryRun: boolean }) {
+  const batchSize = 100;
+  let processed = 0;
+  let skipped = 0;
+  let approved = 0;
+
+  // Use scanStream for non-blocking iteration
+  const stream = redis.scanStream({
+    match: 'HISTORY:*',
+    count: batchSize,
+  });
+
+  const batch: string[] = [];
+
+  for await (const keys of stream) {
+    for (const key of keys) {
+      const contactId = key.replace('HISTORY:', '');
+
+      // Skip if already approved
+      const alreadyApproved = await pairingStore.isApproved(contactId);
+      if (alreadyApproved) {
+        skipped++;
+        continue;
+      }
+
+      batch.push(contactId);
+
+      // Process in batches
+      if (batch.length >= batchSize) {
+        if (!options.dryRun) {
+          await processBatch(batch);
+        }
+        approved += batch.length;
+        batch.length = 0;
+      }
+
+      processed++;
+      if (processed % 100 === 0) {
+        console.log(`Progress: ${processed} processed, ${approved} approved, ${skipped} skipped`);
+      }
+    }
+  }
+
+  // Process remaining
+  if (batch.length > 0 && !options.dryRun) {
+    await processBatch(batch);
+    approved += batch.length;
+  }
+
+  console.log(`Migration complete: ${processed} processed, ${approved} approved, ${skipped} skipped`);
+}
+
+async function processBatch(contactIds: string[]) {
+  // Use pipeline for batch Redis operations
+  const pipeline = redis.pipeline();
+  for (const contactId of contactIds) {
+    const approved: ApprovedContact = {
+      contactId,
+      phoneNumber: contactId.replace('@c.us', ''),
+      approvedAt: Date.now(),
+      approvedBy: 'migration',
+      tier: 'standard',
+    };
+    pipeline.set(`PAIRING:approved:${contactId}`, JSON.stringify(approved));
+  }
+  await pipeline.exec();
+}
+```
+
+**CLI Interface**:
+```bash
+# Dry run (default)
+npm run migrate:pairing
+
+# Execute migration
+npm run migrate:pairing -- --execute
+
+# With verbose logging
+npm run migrate:pairing -- --execute --verbose
+```
 
 **Acceptance Criteria**:
+- [ ] Uses SCAN iterator (not KEYS) to prevent Redis blocking
+- [ ] Batch processing (100 contacts per batch)
+- [ ] Pipeline for efficient Redis writes
+- [ ] Skip already approved contacts
 - [ ] Idempotent (safe to run multiple times)
-- [ ] Progress logging
-- [ ] Dry-run mode
+- [ ] Progress logging every 100 contacts
+- [ ] Dry-run mode by default (requires `--execute` flag)
 - [ ] Run via npm script: `npm run migrate:pairing`
 
 ---
@@ -240,78 +515,243 @@ GET    /api/pairing/approved  # List approved contacts
 
 #### Task 1.2.1: Security Event Logger
 
-**Scope**: Separate logging for security-relevant events
+**Scope**: Extend existing logger for security-relevant events (don't create separate system)
 
-**Files to create**:
-- `packages/shared-types/src/security.ts` (types)
-- `services/gateway/src/utils/security-logger.ts`
-- `services/orchestrator/src/utils/security-logger.ts`
+**Files to modify**:
+- `packages/shared-types/src/security.ts` (new - types only)
+- `services/gateway/src/utils/logger.ts` (extend existing)
+- `services/orchestrator/src/utils/logger.ts` (extend existing)
+
+**Approach**: Extend existing Winston logger with security-specific transport and helper function. Do NOT create a separate logging system.
 
 **Security Events**:
 ```typescript
-type SecurityEventType =
+// packages/shared-types/src/security.ts
+export type SecurityEventType =
   | 'pairing_request'       // New contact attempted access
   | 'pairing_approved'      // Admin approved contact
   | 'pairing_denied'        // Admin denied contact
-  | 'pairing_code_attempt'  // Code verification attempt
+  | 'pairing_code_attempt'  // Code verification attempt (success/failure)
+  | 'pairing_revoked'       // Admin revoked access
   | 'rate_limit_triggered'  // Contact exceeded rate limit
   | 'pause_activated'       // Pause triggered
   | 'kill_switch_activated' // Master kill switch
-  | 'suspicious_content'    // Content flagged by sanitizer
+  | 'suspicious_content'    // Content flagged by analyzer
   | 'auth_session_created'  // WhatsApp session established
   | 'auth_session_expired'; // WhatsApp session lost
+
+export type SecuritySeverity = 'debug' | 'info' | 'warn' | 'error';
+
+export interface SecurityEvent {
+  event: SecurityEventType;
+  contactId?: string;
+  details?: Record<string, unknown>;
+  severity: SecuritySeverity;
+}
+```
+
+**Logger Extension** (add to existing `logger.ts`):
+```typescript
+// Add security-specific file transport
+const securityTransport = new winston.transports.File({
+  filename: 'logs/security.jsonl',
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  maxsize: 10 * 1024 * 1024,  // 10MB
+  maxFiles: 30,               // Keep 30 days
+  tailable: true,
+});
+
+// Add transport to existing logger
+logger.add(securityTransport);
+
+// Helper function for security events
+export function logSecurityEvent(
+  event: SecurityEventType,
+  severity: SecuritySeverity = 'info',
+  contactId?: string,
+  details?: Record<string, unknown>
+): void {
+  const logData = {
+    category: 'security',
+    event,
+    contactId: contactId ? maskContactId(contactId) : undefined,
+    ...details,
+  };
+
+  logger[severity](logData);
+
+  // Optional: Publish to Redis for real-time dashboard alerts
+  if (severity === 'warn' || severity === 'error') {
+    redis.publish('events:security', JSON.stringify({
+      event,
+      severity,
+      timestamp: Date.now(),
+    }));
+  }
+}
+
+// Mask sensitive data in logs
+function maskContactId(contactId: string): string {
+  // Show first 4 and last 2 digits: 1234****89@c.us
+  const phone = contactId.replace('@c.us', '');
+  if (phone.length <= 6) return contactId;
+  return phone.slice(0, 4) + '****' + phone.slice(-2) + '@c.us';
+}
 ```
 
 **Log Format** (JSON Lines):
 ```json
 {
   "timestamp": "2026-01-30T12:00:00Z",
+  "level": "info",
+  "category": "security",
   "event": "pairing_request",
-  "contactId": "123456@c.us",
-  "details": { "code": "******", "displayName": "Unknown" },
-  "severity": "info"
+  "contactId": "1234****89@c.us",
+  "displayName": "Unknown"
 }
 ```
 
 **Acceptance Criteria**:
-- [ ] Logs written to `logs/security.jsonl`
-- [ ] Log rotation (daily, keep 30 days)
+- [ ] Security events logged to separate file `logs/security.jsonl`
+- [ ] Extends existing Winston logger (no new logging system)
+- [ ] Log rotation (10MB max, keep 30 files)
 - [ ] Structured JSON format
+- [ ] Contact IDs masked in logs for privacy
+- [ ] Critical events published to Redis `events:security` channel
 - [ ] Severity levels: debug, info, warn, error
 
 ---
 
-#### Task 1.2.2: Content Sanitizer
+#### Task 1.2.2: Content Analyzer (Detection, Not Modification)
 
-**Scope**: Sanitize incoming messages for security
+**Scope**: Analyze incoming messages for security concerns. **Focus on detection and flagging, NOT modification.** Let Claude handle context interpretation.
 
 **Files to create**:
-- `services/gateway/src/utils/content-sanitizer.ts`
+- `services/gateway/src/utils/content-analyzer.ts`
 
-**Sanitization Rules**:
-1. Strip potential injection patterns
-2. Detect and flag suspicious URLs
-3. Remove control characters
-4. Truncate excessively long messages
-5. Log flagged content to security logger
+**Philosophy**:
+- Do NOT silently modify user messages
+- Flag and log suspicious content
+- Pass original message to AI for processing
+- Log flagged messages for admin review
+
+**Analysis Rules**:
+1. Detect suspicious URLs (static blocklist, not external API)
+2. Detect control characters
+3. Detect excessively long messages
+4. Detect repeated patterns (potential spam)
+5. Log all flags to security logger
 
 **Deliverables**:
 ```typescript
-export interface SanitizationResult {
-  sanitized: string;
-  flags: string[];      // e.g., ['url_suspicious', 'truncated']
-  original: string;
+// services/gateway/src/utils/content-analyzer.ts
+
+export type ContentFlagType =
+  | 'url_suspicious'      // URL matches known phishing domains
+  | 'url_shortener'       // URL uses shortener service
+  | 'control_chars'       // Contains control characters
+  | 'excessive_length'    // Exceeds max length threshold
+  | 'repeated_pattern'    // Contains suspicious repetition
+  | 'potential_injection'; // Contains injection-like patterns
+
+export interface ContentFlag {
+  type: ContentFlagType;
+  details: string;
+  position?: number;      // Character position in content
 }
 
-export function sanitizeMessage(content: string): SanitizationResult;
+export interface ContentAnalysis {
+  original: string;
+  flags: ContentFlag[];
+  riskScore: number;      // 0-1 aggregated score
+  shouldLog: boolean;     // true if any flags present
+}
+
+export function analyzeContent(content: string): ContentAnalysis;
+
+// Static blocklist (no external API calls in hot path)
+const SUSPICIOUS_DOMAINS = new Set([
+  'bit.ly', 'tinyurl.com', 'goo.gl',  // Shorteners
+  // Add known phishing domains
+]);
+
+export function analyzeContent(content: string): ContentAnalysis {
+  const flags: ContentFlag[] = [];
+
+  // 1. Check for URLs
+  const urlPattern = /https?:\/\/[^\s]+/gi;
+  const urls = content.match(urlPattern) || [];
+  for (const url of urls) {
+    try {
+      const domain = new URL(url).hostname.toLowerCase();
+      if (SUSPICIOUS_DOMAINS.has(domain)) {
+        flags.push({ type: 'url_shortener', details: domain });
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
+
+  // 2. Check for control characters (except newlines, tabs)
+  const controlPattern = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+  const controlMatches = content.match(controlPattern);
+  if (controlMatches && controlMatches.length > 0) {
+    flags.push({ type: 'control_chars', details: `${controlMatches.length} found` });
+  }
+
+  // 3. Check length (from shared-types config)
+  const maxLength = parseInt(process.env['MAX_MESSAGE_LENGTH'] || '4000');
+  if (content.length > maxLength) {
+    flags.push({ type: 'excessive_length', details: `${content.length} chars` });
+  }
+
+  // 4. Check for repeated patterns
+  const repeatPattern = /(.{10,})\1{3,}/;  // Same 10+ chars repeated 3+ times
+  if (repeatPattern.test(content)) {
+    flags.push({ type: 'repeated_pattern', details: 'Suspicious repetition' });
+  }
+
+  // Calculate risk score
+  const riskScore = Math.min(1, flags.length * 0.25);
+
+  return {
+    original: content,
+    flags,
+    riskScore,
+    shouldLog: flags.length > 0,
+  };
+}
+```
+
+**Integration in Message Handler**:
+```typescript
+// In message-handler.ts
+const analysis = analyzeContent(message.body);
+if (analysis.shouldLog) {
+  logSecurityEvent('suspicious_content', 'warn', contactId, {
+    flags: analysis.flags,
+    riskScore: analysis.riskScore,
+    preview: analysis.original.slice(0, 100),
+  });
+}
+
+// Pass ORIGINAL content to orchestrator (do not modify)
+await queueMessage(contactId, analysis.original);
 ```
 
 **Acceptance Criteria**:
-- [ ] XSS patterns removed
-- [ ] Suspicious URLs flagged
-- [ ] Control characters stripped
-- [ ] Max length enforced (configurable)
-- [ ] Flagged messages logged
+- [ ] URLs analyzed against static blocklist (no external API calls)
+- [ ] Control characters detected (not removed)
+- [ ] Long messages flagged (not truncated)
+- [ ] Repeated patterns detected
+- [ ] Risk score calculated (0-1)
+- [ ] Flagged messages logged via security logger
+- [ ] Original content passed through unmodified
+- [ ] No runtime performance impact (static analysis only)
 
 ---
 
@@ -320,17 +760,147 @@ export function sanitizeMessage(content: string): SanitizationResult;
 **Scope**: Prevent accidental commit of secrets
 
 **Files to create**:
-- `.detect-secrets.cfg`
-- `.pre-commit-config.yaml`
+- `.gitleaks.toml` (configuration)
+- `.pre-commit-config.yaml` (hook config)
+- `.github/workflows/security.yml` (CI check)
 - Update `package.json` scripts
 
-**Tools**: detect-secrets (Python) or gitleaks (Go)
+**Tool**: `gitleaks` (Go binary - no Python dependency, faster than detect-secrets)
+
+**Configuration** (`.gitleaks.toml`):
+```toml
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known false positives"
+paths = [
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+  '''pnpm-lock\.yaml$''',
+]
+
+# Custom rules for SecondMe patterns
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API Key"
+regex = '''sk-ant-[a-zA-Z0-9-_]{80,}'''
+tags = ["api-key", "anthropic"]
+```
+
+**Pre-commit Hook** (`.pre-commit-config.yaml`):
+```yaml
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.0
+    hooks:
+      - id: gitleaks
+```
+
+**Package.json Scripts**:
+```json
+{
+  "scripts": {
+    "prepare": "husky install",
+    "secrets:scan": "gitleaks detect --source . --verbose",
+    "secrets:scan:staged": "gitleaks protect --staged --verbose"
+  }
+}
+```
+
+**CI Workflow** (`.github/workflows/security.yml`):
+```yaml
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Husky Hook Setup**:
+```bash
+# .husky/pre-commit
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+npx gitleaks protect --staged --verbose
+```
 
 **Acceptance Criteria**:
 - [ ] Pre-commit hook blocks commits with potential secrets
-- [ ] Baseline file for known false positives
-- [ ] CI check for secret detection
+- [ ] Gitleaks config with Anthropic API key pattern
+- [ ] Allowlist for known false positives (lock files, .env.example)
+- [ ] CI workflow runs on PRs to main
+- [ ] `npm run secrets:scan` available for manual checks
 - [ ] Documentation in CONTRIBUTING.md
+
+---
+
+### Phase 1: Critical Implementation Notes
+
+> **Review Date**: 2026-01-30
+
+#### Security Considerations
+
+| Issue | Severity | Resolution |
+|-------|----------|------------|
+| Code generation must be crypto-safe | **High** | Use `crypto.randomInt()`, NOT `Math.random()` |
+| History stored for unapproved contacts | **Medium** | Move history storage AFTER pairing approval check |
+| KEYS command blocks Redis | **Medium** | Use SCAN iterator in migration script |
+| Contact IDs in logs expose PII | **Low** | Mask contact IDs: `1234****89@c.us` |
+
+#### Codebase Patterns to Follow
+
+1. **Lua Scripts for Atomicity**: Follow `history-store.ts:84-157` pattern for multi-key atomic operations
+2. **Runtime Type Guards**: Follow `isStoredMessage()` pattern in shared-types
+3. **Socket Events**: Follow `pause_update` event pattern for real-time dashboard updates
+4. **API Routes**: Follow `frontend/src/app/api/pause/route.ts` structure
+
+#### Message Handler Flow (Final)
+
+```
+handleIncomingMessage()
+  1. Skip if fromMe
+  2. Skip if group (@g.us)
+  3. ──► NEW: Check isApproved()
+       ├─ NO:  handleUnapprovedContact() → return
+       └─ YES: continue
+  4. Store in history (ONLY for approved)
+  5. Check isPaused → skip if true
+  6. Check rate limit → skip if exceeded
+  7. Queue message to orchestrator
+```
+
+#### Dependencies Between Tasks
+
+```
+Task 1.1.1 (Types) ─────────────────────────────────┐
+                                                    │
+Task 1.1.2 (Store) ─── depends on ── Task 1.1.1 ───┤
+                                                    │
+Task 1.1.3 (Gate) ──── depends on ── Task 1.1.2 ───┤
+                                                    │
+Task 1.1.4 (UI) ────── depends on ── Task 1.1.3 ───┤
+                                                    │
+Task 1.1.5 (Migration) depends on ── Task 1.1.2 ───┘
+
+Task 1.2.1 (Logger) ── independent
+Task 1.2.2 (Analyzer) ─ depends on ── Task 1.2.1
+Task 1.2.3 (Secrets) ── independent
+```
 
 ---
 
@@ -986,17 +1556,64 @@ SecondMe Doctor
 
 ## Implementation Order
 
-### Sprint 1: Security Foundation
-1. Task 1.1.1: Pairing Data Model
-2. Task 1.1.2: Pairing Store
-3. Task 1.1.3: Pairing Gate
-4. Task 1.2.1: Security Event Logger
+### Sprint 1: Pairing Core (Week 1)
+**Estimated**: 12-16 hours
 
-### Sprint 2: Pairing Complete + Audit
-1. Task 1.1.4: Pairing Dashboard UI
-2. Task 1.1.5: Auto-Approve Existing
-3. Task 1.2.2: Content Sanitizer
-4. Task 1.2.3: Secret Detection
+1. **Task 1.1.1**: Pairing Data Model & Types (1-2 hours)
+   - Define types in shared-types
+   - Create runtime type guards
+   - Unit tests
+
+2. **Task 1.1.2**: Pairing Store (4-6 hours)
+   - Redis operations with Lua scripts
+   - Secure code generation
+   - Unit tests with Redis mock
+
+3. **Task 1.1.3**: Pairing Gate (4-6 hours)
+   - Modify message handler flow
+   - Code submission detection
+   - Socket events
+
+4. **Task 1.1.5**: Migration Script (2-3 hours)
+   - SCAN-based iteration
+   - Batch processing
+   - Dry-run mode
+
+### Sprint 2: Dashboard + Security (Week 2)
+**Estimated**: 14-18 hours
+
+1. **Task 1.1.4**: Pairing Dashboard UI (6-8 hours)
+   - Pending requests component
+   - Approved contacts component
+   - API routes
+   - Socket.io integration
+
+2. **Task 1.2.1**: Security Logger Extension (2-3 hours)
+   - Extend existing Winston logger
+   - Security file transport
+   - Redis pub/sub for alerts
+
+3. **Task 1.2.3**: Secret Detection Hook (1-2 hours)
+   - Gitleaks configuration
+   - Pre-commit hook
+   - CI workflow
+
+### Sprint 3: Content Analysis + Polish (Week 3)
+**Estimated**: 8-10 hours
+
+1. **Task 1.2.2**: Content Analyzer (4-6 hours)
+   - Detection logic (not modification)
+   - Static URL blocklist
+   - Integration with message handler
+
+2. **Integration Testing** (2-3 hours)
+   - End-to-end pairing flow
+   - Security event logging verification
+   - Dashboard functionality
+
+3. **Documentation** (1-2 hours)
+   - Update CLAUDE.md with pairing keys
+   - Add CONTRIBUTING.md security section
 
 ### Sprint 3: Plugin Foundation
 1. Task 2.1.1: Skill Interface & Registry
