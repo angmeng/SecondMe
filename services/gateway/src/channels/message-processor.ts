@@ -12,10 +12,26 @@
  * Extracted from WhatsApp message-handler.ts to support multi-channel architecture.
  */
 
-import type { ChannelMessage } from '@secondme/shared-types';
+import type { ChannelMessage, ChannelId, ContactTier } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { ChannelLogger } from './types.js';
+
+/**
+ * Interface for contact linker operations (optional dependency)
+ */
+export interface ContactLinkerInterface {
+  linkContact(
+    channelId: ChannelId,
+    contactId: string,
+    normalizedPhone: string,
+    displayName?: string
+  ): Promise<unknown>;
+  isApprovedAcrossChannels(
+    contactId: string,
+    normalizedPhone?: string | null
+  ): Promise<{ approved: boolean; tier?: ContactTier; approvedContactId?: string }>;
+}
 
 /**
  * Result of processing an incoming message
@@ -104,6 +120,8 @@ export interface MessageProcessorDeps {
   emitEvent: (event: string, data: unknown) => void;
   /** Optional: send auto-reply to unapproved contacts */
   sendMessage?: (to: string, content: string) => Promise<void>;
+  /** Optional: contact linker for cross-channel linking */
+  contactLinker?: ContactLinkerInterface;
 }
 
 /**
@@ -133,7 +151,7 @@ export class GatewayMessageProcessor {
    * @returns Result indicating how the message was handled
    */
   async processMessage(message: ChannelMessage, contactName?: string): Promise<ProcessResult> {
-    const { contactId, content, id: messageId, timestamp, channelId } = message;
+    const { contactId, content, id: messageId, timestamp, channelId, normalizedContactId } = message;
 
     this.deps.logger.info(`Processing message from ${this.maskContactId(contactId)}`, {
       contactId: this.maskContactId(contactId),
@@ -141,8 +159,57 @@ export class GatewayMessageProcessor {
       channelId,
     });
 
+    // STEP 0: Auto-link contact if we have a phone number
+    if (normalizedContactId && this.deps.contactLinker) {
+      try {
+        await this.deps.contactLinker.linkContact(
+          channelId,
+          contactId,
+          normalizedContactId,
+          contactName
+        );
+        this.deps.logger.debug(`Linked contact ${this.maskContactId(contactId)} to phone`, {
+          contactId: this.maskContactId(contactId),
+          channelId,
+        });
+      } catch (error) {
+        // Log but don't fail - linking is non-critical
+        this.deps.logger.warn(`Failed to link contact ${this.maskContactId(contactId)}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // STEP 1: Pairing gate - check if contact is approved
-    const isApproved = await this.deps.pairingStore.isApproved(contactId);
+    let isApproved = await this.deps.pairingStore.isApproved(contactId);
+
+    // STEP 1b: If not approved, check if any linked contact is approved
+    if (!isApproved && this.deps.contactLinker) {
+      const linkedResult = await this.deps.contactLinker.isApprovedAcrossChannels(
+        contactId,
+        normalizedContactId
+      );
+
+      if (linkedResult.approved) {
+        // Auto-approve this contact with the same tier as the linked contact
+        this.deps.logger.info(
+          `Auto-approving ${this.maskContactId(contactId)} via linked contact ${linkedResult.approvedContactId}`,
+          {
+            contactId: this.maskContactId(contactId),
+            channelId,
+            linkedContactId: linkedResult.approvedContactId,
+            tier: linkedResult.tier,
+          }
+        );
+
+        await this.deps.pairingStore.approveContact(
+          contactId,
+          'system:linked',
+          linkedResult.tier || 'standard'
+        );
+        isApproved = true;
+      }
+    }
 
     if (!isApproved) {
       return this.handleUnapprovedContact(message, contactName);

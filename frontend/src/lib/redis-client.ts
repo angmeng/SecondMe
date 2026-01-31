@@ -4,7 +4,14 @@
  */
 
 import Redis from 'ioredis';
-import type { PairingRequest, ApprovedContact, ContactTier } from '@secondme/shared-types';
+import type {
+  PairingRequest,
+  ApprovedContact,
+  ContactTier,
+  LinkedContact,
+  StoredLinkedContact,
+} from '@secondme/shared-types';
+import { isStoredLinkedContact } from '@secondme/shared-types';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
@@ -547,6 +554,133 @@ class RedisClient {
     await this.ensureConnected();
     const exists = await this.client.exists(`PAIRING:approved:${contactId}`);
     return exists === 1;
+  }
+
+  // ============================================================
+  // Contact Linking Methods
+  // ============================================================
+
+  /**
+   * Get linked channels for a contact
+   * Returns all channels that share the same phone number
+   */
+  async getLinkedChannels(contactId: string): Promise<LinkedContact['channels']> {
+    await this.ensureConnected();
+
+    // First, get the phone number for this contact
+    const phone = await this.client.get(`LINKED:contact:${contactId}`);
+    if (!phone) {
+      return [];
+    }
+
+    // Then get the linked contact record
+    const json = await this.client.get(`LINKED:phone:${phone}`);
+    if (!json) {
+      return [];
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (isStoredLinkedContact(parsed)) {
+        return parsed.channels;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get linked contact record by phone number
+   */
+  async getLinkedByPhone(phone: string): Promise<StoredLinkedContact | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`LINKED:phone:${phone}`);
+    if (!json) return null;
+
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (isStoredLinkedContact(parsed)) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Batch get linked channels for multiple contacts
+   * Uses Redis mget for efficiency to reduce N+1 queries
+   *
+   * @param contactIds - Array of contact IDs to look up
+   * @returns Map of contactId to their linked channels
+   */
+  async getLinkedChannelsBatch(
+    contactIds: string[]
+  ): Promise<Map<string, LinkedContact['channels']>> {
+    await this.ensureConnected();
+
+    const result = new Map<string, LinkedContact['channels']>();
+    if (contactIds.length === 0) return result;
+
+    // Step 1: Get all phone numbers in batch
+    const phoneResults = await this.client.mget(
+      contactIds.map((id) => `LINKED:contact:${id}`)
+    );
+
+    // Collect unique phones that exist
+    const phoneToContactIds = new Map<string, string[]>();
+    for (let i = 0; i < contactIds.length; i++) {
+      const phone = phoneResults[i];
+      const contactId = contactIds[i]!; // Safe: within bounds
+      if (phone) {
+        const existing = phoneToContactIds.get(phone) || [];
+        existing.push(contactId);
+        phoneToContactIds.set(phone, existing);
+      } else {
+        result.set(contactId, []);
+      }
+    }
+
+    if (phoneToContactIds.size === 0) return result;
+
+    // Step 2: Get all linked contact records in batch
+    const phones = Array.from(phoneToContactIds.keys());
+    const linkedResults = await this.client.mget(phones.map((p) => `LINKED:phone:${p}`));
+
+    // Map results back to contact IDs
+    for (let i = 0; i < phones.length; i++) {
+      const json = linkedResults[i];
+      const phone = phones[i]!; // Safe: within bounds
+      const contactIdsForPhone = phoneToContactIds.get(phone) || [];
+
+      if (json) {
+        try {
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredLinkedContact(parsed)) {
+            for (const contactId of contactIdsForPhone) {
+              result.set(contactId, parsed.channels);
+            }
+          } else {
+            for (const contactId of contactIdsForPhone) {
+              result.set(contactId, []);
+            }
+          }
+        } catch {
+          for (const contactId of contactIdsForPhone) {
+            result.set(contactId, []);
+          }
+        }
+      } else {
+        for (const contactId of contactIdsForPhone) {
+          result.set(contactId, []);
+        }
+      }
+    }
+
+    return result;
   }
 }
 

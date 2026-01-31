@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { socketClient } from '@/lib/socket';
 import KillSwitch from '@/components/KillSwitch';
 import SessionExpiryCountdown from '@/components/SessionExpiryCountdown';
+import ChannelStatusGrid from '@/components/ChannelStatusGrid';
 import Link from 'next/link';
 import { EmptyStateNoActivity } from '@/components/ui/EmptyState';
 
@@ -328,6 +329,12 @@ export default function HomePage() {
         {/* Master Kill Switch */}
         <div className="mb-8 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
           <KillSwitch />
+        </div>
+
+        {/* Channels */}
+        <div className="mb-8 animate-fade-in-up" style={{ animationDelay: '175ms' }}>
+          <h2 className="mb-4 text-lg font-semibold text-slate-900 dark:text-white">Channels</h2>
+          <ChannelStatusGrid />
         </div>
 
         {/* Recent Activity */}
