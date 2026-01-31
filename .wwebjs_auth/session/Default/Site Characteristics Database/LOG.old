@@ -1,2 +1,3 @@
-2026/01/31-10:45:54.813 3cf155 Creating DB /Users/jazlim/Projects/SecondMe/.wwebjs_auth/session/Default/Site Characteristics Database since it was missing.
-2026/01/31-10:45:54.821 3cf155 Reusing MANIFEST /Users/jazlim/Projects/SecondMe/.wwebjs_auth/session/Default/Site Characteristics Database/MANIFEST-000001
+2026/01/31-11:26:31.173 3e71bc Reusing MANIFEST /Users/jazlim/Projects/SecondMe/.wwebjs_auth/session/Default/Site Characteristics Database/MANIFEST-000001
+2026/01/31-11:26:31.173 3e71bc Recovering log #3
+2026/01/31-11:26:31.173 3e71bc Reusing old log /Users/jazlim/Projects/SecondMe/.wwebjs_auth/session/Default/Site Characteristics Database/000003.log 

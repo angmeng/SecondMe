@@ -28,6 +28,16 @@ export {
 // Rate limiting
 export { RateLimiter } from './rate-limiter.js';
 
+// Message processing
+export {
+  GatewayMessageProcessor,
+  type MessageProcessorDeps,
+  type ProcessResult,
+  type PairingStoreInterface,
+  type HistoryStoreInterface,
+  type RedisClientInterface,
+} from './message-processor.js';
+
 // Re-export shared types
 export type {
   Channel,
