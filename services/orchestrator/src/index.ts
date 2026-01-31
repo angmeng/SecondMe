@@ -147,10 +147,14 @@ async function startOrchestratorService() {
     await redisClient.connect();
     console.log('[Orchestrator] Redis connected');
 
-    // Initialize AutoMem connection
+    // Initialize AutoMem connection (optional - service continues without it)
     console.log('[Orchestrator] Connecting to AutoMem...');
     await automemClient.connect();
-    console.log('[Orchestrator] AutoMem connected');
+    if (automemClient.connected) {
+      console.log('[Orchestrator] AutoMem connected');
+    } else {
+      console.log('[Orchestrator] AutoMem not available - memory features disabled');
+    }
 
     // Verify Anthropic API key
     if (!process.env['ANTHROPIC_API_KEY']) {

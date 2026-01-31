@@ -3,7 +3,7 @@
 **Created**: 2026-01-30
 **Updated**: 2026-01-31
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Phase 1 Complete ✅
+**Status**: Phase 3 In Progress (Telegram Core Complete)
 
 ---
 
@@ -1369,13 +1369,21 @@ interface QueuedMessage {
 
 **Scope**: Add Telegram as second supported channel
 
-**Files to create**:
+**Status**: ✅ Core Implementation Complete (2026-01-31)
+
+**Files created**:
 ```
 services/gateway/src/channels/telegram/
 ├── index.ts          # Exports
 ├── adapter.ts        # TelegramChannel implements Channel
-├── client.ts         # grammY bot wrapper
 └── normalizer.ts     # Contact ID normalization
+```
+
+**Files tested**:
+```
+services/gateway/src/channels/__tests__/
+├── telegram-adapter.test.ts    # 29 tests
+└── telegram-normalizer.test.ts # 26 tests
 ```
 
 **Dependencies**: `grammy` (MIT license, well-maintained)
@@ -1383,17 +1391,16 @@ services/gateway/src/channels/telegram/
 **Implementation**:
 ```typescript
 // services/gateway/src/channels/telegram/adapter.ts
-export class TelegramChannel implements Channel {
+export class TelegramChannel extends BaseChannel {
   readonly id: ChannelId = 'telegram';
   readonly displayName = 'Telegram';
   readonly icon = 'telegram';
 
-  constructor(botToken: string);
+  constructor(deps: TelegramChannelDeps, config: TelegramChannelConfig, options?: ChannelInitOptions);
 
   normalizeContactId(contactId: string): string | null {
-    // Telegram users may share phone; extract if available
-    // Format: 'user_123456789' or phone if shared
-    return null; // Phone only available if user shares it
+    // Telegram users don't share phone numbers by default
+    return null;
   }
 }
 ```
@@ -1401,18 +1408,47 @@ export class TelegramChannel implements Channel {
 **Telegram-Specific Handling**:
 - Bot must be started with `/start` command
 - Users can share phone number (for linking)
-- Inline keyboards for pairing approval
 - Voice messages have different format than WhatsApp
+- Video messages supported with duration/width/height metadata
 
 **Acceptance Criteria**:
-- [ ] Telegram bot connects via grammY
-- [ ] Messages queued with channelId='telegram'
-- [ ] Responses sent back to Telegram
-- [ ] `/start` command handled (welcome + pairing if needed)
-- [ ] Text messages supported
-- [ ] Photo messages supported (at minimum)
-- [ ] Dashboard shows Telegram connection status
-- [ ] Graceful handling of rate limits
+- [x] Telegram bot connects via grammY
+- [x] Messages queued with channelId='telegram'
+- [x] Responses sent back to Telegram
+- [x] `/start` command handled (welcome message)
+- [x] Text messages supported
+- [x] Photo messages supported
+- [x] Voice messages supported
+- [x] Document messages supported
+- [x] Video messages supported
+- [x] Token format validation (fail fast on invalid tokens)
+- [x] Contact caching from incoming messages
+- [x] Graceful disconnect with cache cleanup
+- [ ] Dashboard shows Telegram connection status (Task 3.1.5)
+- [ ] Graceful handling of rate limits (deferred)
+
+##### Code Review Fixes (2026-01-31)
+
+**Priority fixes implemented**:
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| Video handler | Handle `message:video` events with metadata | ✅ Complete |
+| Contact caching | Cache contact info from incoming messages, clear on disconnect | ✅ Complete |
+| Token validation | Fail fast with clear error for invalid tokens (must contain `:`) | ✅ Complete |
+
+**Test improvements**:
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| Remove unused import | Removed `type Mock` from vitest imports | ✅ Complete |
+| Update test tokens | Changed test tokens to include colon format | ✅ Complete |
+| New validation tests | Added tests for empty/invalid token formats | ✅ Complete |
+| Handler registration tests | Added tests for all message type handlers | ✅ Complete |
+
+**Deferred items** (nice-to-have):
+- Configurable `/start` message
+- Repeated typing indicator for long responses
 
 ---
 

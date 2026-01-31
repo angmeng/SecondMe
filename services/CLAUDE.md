@@ -6,9 +6,12 @@ This file provides guidance for Claude Code when working with SecondMe backend s
 
 ```
 services/
-├── gateway/           # WhatsApp integration (port 3001)
+├── gateway/           # Multi-channel messaging gateway (port 3001)
 │   └── src/
-│       ├── whatsapp/  # Client, auth, sender, message handler
+│       ├── channels/  # Channel abstraction layer
+│       │   ├── telegram/  # Telegram adapter (grammY)
+│       │   └── whatsapp/  # WhatsApp adapter (whatsapp-web.js)
+│       ├── whatsapp/  # Legacy WhatsApp code (being migrated)
 │       ├── redis/     # Pub/sub, queue client, history store
 │       ├── socket/    # Real-time event emitter
 │       └── middleware/# Security middleware
@@ -31,7 +34,7 @@ services/
 ## Gateway Service
 
 ### Purpose
-Bridges WhatsApp Web.js with the microservices architecture via Redis Streams.
+Multi-channel messaging gateway that bridges messaging platforms (WhatsApp, Telegram) with the microservices architecture via Redis Streams.
 
 ### Key Files
 | File | Responsibility |
@@ -67,6 +70,31 @@ await redis.xadd('QUEUE:messages', '*', { ... });
 ```typescript
 const delay = 30 + (text.length * 2) + randomJitter(0, 500);
 // Capped at 5000ms
+```
+
+### Channel Abstraction Layer
+
+The gateway uses a channel abstraction to support multiple messaging platforms.
+
+**Key Files**:
+| File | Responsibility |
+|------|----------------|
+| `channels/base-channel.ts` | Abstract base class for all channels |
+| `channels/types.ts` | Channel interfaces and types |
+| `channels/rate-limiter.ts` | Reusable rate limiting logic |
+| `channels/telegram/adapter.ts` | Telegram bot adapter (grammY) |
+| `channels/telegram/normalizer.ts` | Telegram contact ID normalization |
+
+**Telegram Channel**:
+- Uses grammY library for Telegram Bot API
+- Contact IDs normalized to `tg_{userId}` format
+- Supports text, photo, voice, document, and video messages
+- Token validation on construction (must contain `:`)
+- Contact caching from incoming messages
+
+**Environment Variables**:
+```bash
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...  # From @BotFather
 ```
 
 ## Orchestrator Service

@@ -64,6 +64,16 @@ export {
 // Base class
 export { BaseChannel } from './base-channel.js';
 
+// Channel Manager
+export {
+  ChannelManager,
+  type ManagedChannelInfo,
+  type ChannelManagerDeps,
+} from './channel-manager.js';
+
+// Channel Router
+export { ChannelRouter, type ChannelRouterDeps } from './channel-router.js';
+
 // WhatsApp channel
 export {
   WhatsAppChannel,
@@ -74,3 +84,15 @@ export {
   isStatusBroadcast,
   extractPhoneNumber,
 } from './whatsapp/index.js';
+
+// Telegram channel
+export {
+  TelegramChannel,
+  type TelegramChannelDeps,
+  type TelegramChannelConfig,
+  normalizeTelegramContactId,
+  extractTelegramUserId,
+  isTelegramContact,
+  extractPhoneFromTelegramContact,
+  isTelegramGroup,
+} from './telegram/index.js';
