@@ -1,9 +1,9 @@
 # Moltbot Implementation Plan for SecondMe
 
 **Created**: 2026-01-30
-**Updated**: 2026-01-31
+**Updated**: 2026-02-01
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Phase 3 In Progress (Dashboard Complete, Task 3.1.6 Remaining)
+**Status**: Phase 3 Complete (Multi-Channel Support)
 
 ---
 
@@ -18,7 +18,7 @@ This plan translates moltbot learnings into actionable tasks for SecondMe, organ
 | P0 | Pairing Mode | Medium | High | None | ✅ Complete |
 | P1 | Security Audit System | Low | Medium | None | ✅ Complete |
 | P1 | Plugin Architecture | High | High | None | ✅ Complete |
-| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | 🔄 In Progress |
+| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | ✅ Complete |
 | P2 | Voice Message Support | Medium | Medium | None | 🔲 Not Started |
 | P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem | 🔲 Not Started |
 | P3 | Onboarding Wizard | Medium | Medium | None | 🔲 Not Started |
@@ -1015,7 +1015,68 @@ For now, only built-in skills are supported
 
 ---
 
-## Phase 3: Multi-Channel Support (P2)
+## Phase 3 Completion Summary ✅
+
+**Completed**: 2026-02-01
+**Review**: All 6 tasks implemented (3.1.1-3.1.6), 100% complete
+
+### Implementation Highlights
+
+| Task | Files Created | Key Features |
+|------|---------------|--------------|
+| 3.1.1 Channel Interface | `shared-types/channels.ts`, `gateway/channels/types.ts` | Channel, ChannelMessage, ChannelContact types |
+| 3.1.2a Extract Logic | `gateway/channels/rate-limiter.ts` | Reusable RateLimiter class, 22 unit tests |
+| 3.1.2b/c WhatsApp Adapter | `gateway/channels/whatsapp/` | Channel interface implementation |
+| 3.1.3 Channel Manager | `gateway/channels/channel-manager.ts`, `message-processor.ts` | Multi-channel routing, unified message processing |
+| 3.1.4 Telegram | `gateway/channels/telegram/` | grammY adapter, 55 unit tests |
+| 3.1.5 Dashboard | `frontend/components/ChannelStatus*.tsx` | Real-time status, enable/disable toggles |
+| 3.1.6 Contact Linking | `gateway/contact-linking/` | Cross-channel phone linking, batch queries |
+
+### Architecture
+
+```
+ChannelManager
+├── WhatsAppChannel (whatsapp-web.js)
+├── TelegramChannel (grammY)
+└── [Future channels...]
+
+MessageProcessor
+├── PairingStore (approval gate)
+├── RateLimiter (per-contact limits)
+├── ContactLinker (cross-channel linking)
+└── ContentAnalyzer (security flags)
+```
+
+### New Redis Keys
+
+```
+LINKED:phone:{normalizedPhone}  # StoredLinkedContact JSON
+LINKED:contact:{contactId}      # normalizedPhone reverse lookup
+```
+
+### New API Endpoints
+
+**Gateway (port 3001)**:
+```
+GET    /api/channels                    # List all channels
+POST   /api/channels/:id/enable         # Enable channel
+POST   /api/channels/:id/disable        # Disable channel
+```
+
+**Frontend (port 3000)**:
+```
+GET    /api/channels                    # Proxy to gateway
+POST   /api/channels/:id                # Enable/disable via action
+```
+
+### Socket.io Events
+
+- `channel_manager_status` - Channel status updates (all channels)
+- `channel_status` - Individual channel status change
+
+---
+
+## Phase 3: Multi-Channel Support (P2) ✅ COMPLETE
 
 ### Epic 3.1: Channel Abstraction Layer
 
@@ -1525,68 +1586,68 @@ POST   /api/channels/:id                # Enable/disable via action param
 
 ---
 
-#### Task 3.1.6: Cross-Channel Contact Linking
+#### Task 3.1.6: Cross-Channel Contact Linking ✅ COMPLETE
 
+**Completed**: 2026-02-01
 **Scope**: Link contacts across channels by phone number
 
-**Files to create**:
-- `services/gateway/src/channels/contact-linker.ts`
-- `packages/shared-types/src/linked-contact.ts`
+**Files created**:
+- `services/gateway/src/contact-linking/contact-linker.ts` - ContactLinker class
+- `services/gateway/src/contact-linking/__tests__/contact-linker.test.ts` - 29 unit tests
+
+**Files modified**:
+- `packages/shared-types/src/channels.ts` - LinkedContact, StoredLinkedContact types
+- `packages/shared-types/src/pairing.ts` - EnrichedApprovedContact type
+- `services/gateway/src/channels/message-processor.ts` - Auto-link on message
+- `frontend/src/lib/redis-client.ts` - getLinkedChannels, getLinkedChannelsBatch methods
+- `frontend/src/app/api/pairing/approved/route.ts` - Enrich with linked channels
+- `frontend/src/components/ApprovedContacts.tsx` - Display linked channel badges
 
 **Redis Keys**:
 ```
-CONTACTS:linked:{normalizedPhone}  # Set of {channelId}:{contactId}
-CONTACTS:phone:{channelId}:{contactId}  # Normalized phone number
+LINKED:phone:{normalizedPhone}  # StoredLinkedContact JSON (no TTL)
+LINKED:contact:{contactId}      # normalizedPhone string (no TTL)
 ```
 
-**Deliverables**:
+**Implementation**:
 ```typescript
-// services/gateway/src/channels/contact-linker.ts
+// services/gateway/src/contact-linking/contact-linker.ts
 export class ContactLinker {
-  constructor(private redis: Redis);
+  constructor(deps: ContactLinkerDeps);
 
-  /**
-   * Link a contact to their phone number
-   */
-  async linkContact(
-    channelId: ChannelId,
-    contactId: string,
-    normalizedPhone: string,
-  ): Promise<void>;
-
-  /**
-   * Find all channel contacts for a phone number
-   */
-  async findLinkedContacts(
-    normalizedPhone: string,
-  ): Promise<LinkedContact[]>;
-
-  /**
-   * Get phone number for a contact (if known)
-   */
-  async getPhoneForContact(
-    channelId: ChannelId,
-    contactId: string,
-  ): Promise<string | null>;
-}
-
-export interface LinkedContact {
-  channelId: ChannelId;
-  contactId: string;
-  normalizedPhone: string;
+  async linkContact(channelId, contactId, normalizedPhone, displayName?): Promise<StoredLinkedContact>;
+  async getLinkedByPhone(normalizedPhone): Promise<StoredLinkedContact | null>;
+  async getPhoneForContact(contactId): Promise<string | null>;
+  async isApprovedAcrossChannels(contactId, normalizedPhone?): Promise<LinkedApprovalResult>;
+  async getLinkedChannelsForContact(contactId): Promise<LinkedContact['channels']>;
+  async getLinkedChannelsBatch(contactIds): Promise<Map<string, LinkedContact['channels']>>;
+  async unlinkContact(contactId): Promise<boolean>;
+  async listLinkedGroups(limit?): Promise<StoredLinkedContact[]>;
 }
 ```
 
 **Use Cases**:
 1. Same person messages on WhatsApp and Telegram
-2. Conversation history shared across channels
-3. Pairing approval applies to all linked contacts
+2. Pairing approval applies to all linked contacts (via `isApprovedAcrossChannels`)
+3. Dashboard shows linked channels for each approved contact
 
 **Acceptance Criteria**:
-- [ ] Contacts can be linked by phone number
-- [ ] Linked contacts share pairing approval
-- [ ] Linked contacts share conversation history (future)
-- [ ] Dashboard shows linked contacts together (future)
+- [x] Contacts can be linked by phone number
+- [x] Linked contacts share pairing approval
+- [x] Dashboard shows linked contacts together
+- [x] E.164 phone number validation
+- [x] Batch fetching for N+1 query prevention
+
+##### Code Review Improvements (2026-02-01)
+
+| Improvement | Description | Status |
+|-------------|-------------|--------|
+| E.164 validation | Phone numbers validated against E.164 regex in `linkContact` | ✅ Complete |
+| `getLinkedChannelsBatch` | Batch method using `mget` to reduce N+1 queries | ✅ Complete |
+| Shared `EnrichedApprovedContact` | Type moved from route/component to shared-types | ✅ Complete |
+| Fixed test mock | Pipeline mock returns `pipelineObj` instead of `this` | ✅ Complete |
+| Validation tests | Added 4 tests for E.164 format validation | ✅ Complete |
+| Batch tests | Added 5 tests for `getLinkedChannelsBatch` | ✅ Complete |
 
 ---
 

@@ -108,6 +108,8 @@ WhatsApp ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `PAIRING:denied:{contactId}` - Denied contact with cooldown (24h TTL)
 - `SKILLS:enabled` - Set of enabled skill IDs (no TTL)
 - `SKILLS:config:{skillId}` - JSON config per skill (no TTL)
+- `LINKED:phone:{normalizedPhone}` - Cross-channel contact linking by phone (no TTL)
+- `LINKED:contact:{contactId}` - Reverse lookup: contactId → phone (no TTL)
 
 ### Environment Variables
 Required in `.env`:
