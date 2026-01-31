@@ -26,6 +26,9 @@ import {
   RateLimiter,
   GatewayMessageProcessor,
   WhatsAppChannel,
+  TelegramChannel,
+  ChannelManager,
+  ChannelRouter,
   type ChannelLogger,
 } from './channels/index.js';
 import express from 'express';
@@ -67,6 +70,8 @@ let contactManager: ContactManager;
 let whatsappChannel: WhatsAppChannel;
 let messageProcessor: GatewayMessageProcessor;
 let rateLimiter: RateLimiter;
+let channelManager: ChannelManager;
+let channelRouter: ChannelRouter;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -114,6 +119,24 @@ app.post('/api/session/refresh', async (req, res) => {
   } catch (error: any) {
     res.status(500).json({
       error: error.message || 'Failed to refresh session',
+    });
+  }
+});
+
+// Channel status endpoint - get all registered channels with status
+app.get('/api/channels', async (req, res) => {
+  try {
+    if (!channelManager) {
+      return res.status(503).json({
+        error: 'Channel manager not initialized',
+      });
+    }
+
+    const status = await channelManager.getStatus();
+    res.json({ channels: status });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to get channel status',
     });
   }
 });
@@ -315,15 +338,6 @@ async function startGatewayService() {
     await redisClient.connect();
     console.log('[Gateway] Redis connected');
 
-    // Initialize WhatsApp client
-    console.log('[Gateway] Initializing WhatsApp client...');
-    await whatsappClient.initialize();
-
-    // Initialize handlers after WhatsApp client is ready
-    const client = whatsappClient.getClient();
-    messageSender = new MessageSender(client);
-    sessionManager = new SessionManager(client);
-
     // Create event emitter callback
     const emitEvent = (event: string, data: unknown) => io.emit(event, data);
 
@@ -355,6 +369,16 @@ async function startGatewayService() {
       },
     });
 
+    // Initialize channel manager
+    channelManager = new ChannelManager(
+      { logger, emitEvent },
+      {
+        enabled: true,
+        contactLinkingEnabled: false, // Phase 3.1.6
+        defaultChannel: 'whatsapp',
+      }
+    );
+
     // Initialize WhatsApp channel
     // Note: The channel will use the already-initialized whatsappClient singleton
     whatsappChannel = new WhatsAppChannel(
@@ -366,31 +390,58 @@ async function startGatewayService() {
       { autoConnect: false }
     );
 
-    // Register message handler BEFORE connecting
-    // The channel converts raw WhatsApp messages to ChannelMessage format
-    whatsappChannel.onMessage(async (channelMsg) => {
-      // Get contact name from WhatsApp
-      let contactName = 'Unknown';
-      try {
-        const contact = await whatsappChannel.getContact(channelMsg.contactId);
-        if (contact && contact.displayName) {
-          contactName = contact.displayName;
-        }
-      } catch {
-        // Use default name on error
-      }
+    // Register channel with manager and enable it (this initializes WhatsApp client)
+    console.log('[Gateway] Initializing WhatsApp client...');
+    channelManager.register(whatsappChannel);
+    await channelManager.enable('whatsapp');
 
-      await messageProcessor.processMessage(channelMsg, contactName);
+    // Get the WhatsApp client after channel is initialized
+    const client = whatsappClient.getClient();
+    messageSender = new MessageSender(client);
+    sessionManager = new SessionManager(client);
+
+    // Initialize Telegram channel if enabled
+    if (process.env['TELEGRAM_ENABLED'] === 'true') {
+      const telegramToken = process.env['TELEGRAM_BOT_TOKEN'];
+      if (!telegramToken) {
+        console.warn('[Gateway] TELEGRAM_ENABLED=true but TELEGRAM_BOT_TOKEN not set');
+      } else {
+        console.log('[Gateway] Initializing Telegram channel...');
+        const telegramChannel = new TelegramChannel(
+          { logger, emitEvent },
+          {
+            botToken: telegramToken,
+            skipGroups: true,
+          },
+          { autoConnect: false }
+        );
+
+        channelManager.register(telegramChannel);
+        await channelManager.enable('telegram');
+
+        // Log status changes
+        telegramChannel.onStatusChange((status, error) => {
+          console.log(`[Gateway] Telegram channel status: ${status}`, error ? `(${error})` : '');
+        });
+
+        console.log('[Gateway] Telegram channel registered');
+      }
+    }
+
+    // Initialize channel router
+    channelRouter = new ChannelRouter({
+      channelManager,
+      messageProcessor,
+      logger,
     });
 
-    // Register status change handler
+    // Set up message routing for all registered channels
+    channelRouter.setupRoutes();
+
+    // Register status change handler for logging
     whatsappChannel.onStatusChange((status, error) => {
       console.log(`[Gateway] WhatsApp channel status: ${status}`, error ? `(${error})` : '');
     });
-
-    // Connect the channel - this sets up event handlers on the existing client
-    // Since whatsappClient is already initialized, this just hooks up handlers
-    await whatsappChannel.connect();
 
     // Handle fromMe messages via message_create event
     // Note: The channel's 'message' handler ignores fromMe messages,
@@ -465,7 +516,19 @@ async function shutdown() {
       sessionManager.stop();
     }
 
-    await whatsappClient.destroy();
+    // Remove routes before shutting down channels
+    if (channelRouter) {
+      channelRouter.removeRoutes();
+    }
+
+    // Shutdown channel manager (disconnects all channels)
+    if (channelManager) {
+      await channelManager.shutdown();
+    } else {
+      // Fallback to direct client destroy if manager not initialized
+      await whatsappClient.destroy();
+    }
+
     await redisClient.quit();
     httpServer.close(() => {
       console.log('[Gateway] Gateway service shut down');
