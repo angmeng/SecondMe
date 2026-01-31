@@ -114,6 +114,54 @@ TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...  # From @BotFather
 TELEGRAM_ENABLED=true                       # Enable Telegram channel
 ```
 
+### Cross-Channel Contact Linking
+
+Links contacts across messaging channels by normalized phone number, enabling shared approval status and unified contact view.
+
+**Key Files**:
+| File | Responsibility |
+|------|----------------|
+| `contact-linking/contact-linker.ts` | ContactLinker class with phone-based linking |
+
+**Redis Keys**:
+```
+LINKED:phone:{normalizedPhone}  # StoredLinkedContact JSON (no TTL)
+LINKED:contact:{contactId}      # normalizedPhone reverse lookup (no TTL)
+```
+
+**ContactLinker API**:
+```typescript
+class ContactLinker {
+  // Link a contact to their phone number (auto-called on message)
+  async linkContact(channelId, contactId, normalizedPhone, displayName?): Promise<StoredLinkedContact>;
+
+  // Check if any linked contact is approved (cross-channel approval)
+  async isApprovedAcrossChannels(contactId, normalizedPhone?): Promise<LinkedApprovalResult>;
+
+  // Get all channels linked to a contact
+  async getLinkedChannelsForContact(contactId): Promise<LinkedContact['channels']>;
+
+  // Batch get for N+1 query prevention (used by dashboard API)
+  async getLinkedChannelsBatch(contactIds): Promise<Map<string, LinkedContact['channels']>>;
+
+  // Reverse lookup: get phone for contact ID
+  async getPhoneForContact(contactId): Promise<string | null>;
+
+  // Unlink a contact (preserves other channels)
+  async unlinkContact(contactId): Promise<boolean>;
+}
+```
+
+**Phone Number Validation**:
+- All phone numbers must be in E.164 format (e.g., `+1234567890`)
+- `linkContact` throws an error for invalid formats
+- Regex: `/^\+[1-9]\d{1,14}$/`
+
+**Shared Types** (from `@secondme/shared-types`):
+- `LinkedContact` - Contact with all channel entries
+- `StoredLinkedContact` - LinkedContact with timestamps
+- `EnrichedApprovedContact` - ApprovedContact with linkedChannels for dashboard
+
 ## Orchestrator Service
 
 ### Purpose
