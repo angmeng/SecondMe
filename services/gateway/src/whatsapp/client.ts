@@ -5,13 +5,14 @@
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
-import { io } from '../index';
-import { redisClient } from '../redis/client';
+import { redisClient } from '../redis/client.js';
 import path from 'path';
 
 class WhatsAppClient {
   private client: Client;
   private ready: boolean = false;
+  private initializing: boolean = false;
+  private initialized: boolean = false;
 
   constructor() {
     // Initialize WhatsApp client with LocalAuth strategy
@@ -37,21 +38,16 @@ class WhatsAppClient {
   }
 
   private setupEventHandlers(): void {
-    // QR code event - stream to frontend via Socket.io
-    this.client.on('qr', (qr) => {
+    // QR code event - publish to Redis for distributed systems
+    // Socket.io events are now handled by WhatsAppChannel
+    this.client.on('qr', (qr: string) => {
       console.log('[Gateway WhatsApp] QR code received');
 
-      // Emit QR code to all connected dashboard clients
-      io.emit('qr_code', {
-        qr,
-        timestamp: Date.now(),
-      });
-
-      // Also publish to Redis pub/sub for distributed systems
+      // Publish to Redis pub/sub for distributed systems
       redisClient.publish('events:qr', JSON.stringify({
         qr,
         timestamp: Date.now(),
-      })).catch(err => console.error('[Gateway WhatsApp] Failed to publish QR:', err));
+      })).catch((err: unknown) => console.error('[Gateway WhatsApp] Failed to publish QR:', err));
     });
 
     // Ready event - WhatsApp connected
@@ -59,18 +55,12 @@ class WhatsAppClient {
       console.log('[Gateway WhatsApp] WhatsApp client ready and connected');
       this.ready = true;
 
-      // Emit ready status to dashboard
-      io.emit('connection_status', {
-        status: 'ready',
-        timestamp: Date.now(),
-      });
-
-      // Publish to Redis
+      // Publish to Redis for distributed systems
       redisClient.publish('events:status', JSON.stringify({
         service: 'gateway',
         status: 'connected',
         timestamp: Date.now(),
-      })).catch(err => console.error('[Gateway WhatsApp] Failed to publish status:', err));
+      })).catch((err: unknown) => console.error('[Gateway WhatsApp] Failed to publish status:', err));
     });
 
     // Authenticated event
@@ -79,50 +69,53 @@ class WhatsAppClient {
     });
 
     // Authentication failure event
-    this.client.on('auth_failure', (msg) => {
+    this.client.on('auth_failure', (msg: string) => {
       console.error('[Gateway WhatsApp] Authentication failed:', msg);
-
-      io.emit('connection_status', {
-        status: 'disconnected',
-        error: msg,
-        timestamp: Date.now(),
-      });
+      // Socket.io events are now handled by WhatsAppChannel
     });
 
     // Disconnected event
-    this.client.on('disconnected', (reason) => {
+    this.client.on('disconnected', (reason: string) => {
       console.log('[Gateway WhatsApp] Client disconnected:', reason);
       this.ready = false;
 
-      io.emit('connection_status', {
-        status: 'disconnected',
-        reason,
-        timestamp: Date.now(),
-      });
-
-      // Publish to Redis
+      // Publish to Redis for distributed systems
       redisClient.publish('events:status', JSON.stringify({
         service: 'gateway',
         status: 'disconnected',
         reason,
         timestamp: Date.now(),
-      })).catch(err => console.error('[Gateway WhatsApp] Failed to publish status:', err));
+      })).catch((err: unknown) => console.error('[Gateway WhatsApp] Failed to publish status:', err));
     });
 
     // Loading screen event
-    this.client.on('loading_screen', (percent, message) => {
+    this.client.on('loading_screen', (percent: number, message: string) => {
       console.log(`[Gateway WhatsApp] Loading: ${percent}% - ${message}`);
     });
   }
 
   async initialize(): Promise<void> {
+    // Already initialized or in progress - skip
+    if (this.initialized || this.initializing) {
+      console.log('[Gateway WhatsApp] Client already initialized, skipping');
+      return;
+    }
+
+    this.initializing = true;
     console.log('[Gateway WhatsApp] Initializing WhatsApp client...');
-    await this.client.initialize();
+
+    try {
+      await this.client.initialize();
+      this.initialized = true;
+    } finally {
+      this.initializing = false;
+    }
   }
 
   async destroy(): Promise<void> {
     console.log('[Gateway WhatsApp] Destroying WhatsApp client...');
     this.ready = false;
+    this.initialized = false;
     await this.client.destroy();
   }
 

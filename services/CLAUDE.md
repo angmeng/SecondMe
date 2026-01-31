@@ -6,9 +6,12 @@ This file provides guidance for Claude Code when working with SecondMe backend s
 
 ```
 services/
-├── gateway/           # WhatsApp integration (port 3001)
+├── gateway/           # Multi-channel messaging gateway (port 3001)
 │   └── src/
-│       ├── whatsapp/  # Client, auth, sender, message handler
+│       ├── channels/  # Channel abstraction layer
+│       │   ├── telegram/  # Telegram adapter (grammY)
+│       │   └── whatsapp/  # WhatsApp adapter (whatsapp-web.js)
+│       ├── whatsapp/  # Legacy WhatsApp code (being migrated)
 │       ├── redis/     # Pub/sub, queue client, history store
 │       ├── socket/    # Real-time event emitter
 │       └── middleware/# Security middleware
@@ -31,7 +34,7 @@ services/
 ## Gateway Service
 
 ### Purpose
-Bridges WhatsApp Web.js with the microservices architecture via Redis Streams.
+Multi-channel messaging gateway that bridges messaging platforms (WhatsApp, Telegram) with the microservices architecture via Redis Streams.
 
 ### Key Files
 | File | Responsibility |
@@ -69,6 +72,48 @@ const delay = 30 + (text.length * 2) + randomJitter(0, 500);
 // Capped at 5000ms
 ```
 
+### Channel Abstraction Layer
+
+The gateway uses a channel abstraction to support multiple messaging platforms.
+
+**Key Files**:
+| File | Responsibility |
+|------|----------------|
+| `channels/base-channel.ts` | Abstract base class for all channels |
+| `channels/types.ts` | Channel interfaces and types |
+| `channels/rate-limiter.ts` | Reusable rate limiting logic |
+| `channels/telegram/adapter.ts` | Telegram bot adapter (grammY) |
+| `channels/telegram/normalizer.ts` | Telegram contact ID normalization |
+
+**Telegram Channel**:
+- Uses grammY library for Telegram Bot API
+- Contact IDs normalized to `tg_{userId}` format
+- Supports text, photo, voice, document, and video messages
+- Token validation on construction (must contain `:`)
+- Contact caching from incoming messages
+
+**Channel Manager API**:
+```
+GET    /api/channels                    # List all channels with status
+POST   /api/channels/:channelId/enable  # Enable a channel
+POST   /api/channels/:channelId/disable # Disable a channel
+```
+
+**Socket.io Events**:
+- `channel_manager_status` - Emitted when channel status changes
+  - Payload: `{ channels: ManagedChannelInfo[], timestamp: number }`
+
+**Shared Types** (from `@secondme/shared-types`):
+- `ManagedChannelInfo` - Channel info with `enabled` field for dashboard
+- `ChannelInfo` - Base channel information
+- `ChannelStatus` - Connection status enum (`connected` | `connecting` | `disconnected` | `error`)
+
+**Environment Variables**:
+```bash
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...  # From @BotFather
+TELEGRAM_ENABLED=true                       # Enable Telegram channel
+```
+
 ## Orchestrator Service
 
 ### Purpose
@@ -79,7 +124,7 @@ Orchestrates AI workflow using LangGraph, manages Claude API calls, and retrieve
 |------|----------------|
 | `langgraph/workflow.ts` | Main StateGraph workflow definition |
 | `langgraph/router-node.ts` | Phatic vs substantive routing |
-| `langgraph/graph-node.ts` | FalkorDB context retrieval node |
+| `langgraph/graph-node.ts` | FalkorDB context retrieval node, skill-based retrieval |
 | `anthropic/haiku-client.ts` | Claude Haiku for classification |
 | `anthropic/sonnet-client.ts` | Claude Sonnet with prompt caching |
 | `anthropic/prompt-templates.ts` | System prompts, persona templates |
@@ -89,6 +134,9 @@ Orchestrates AI workflow using LangGraph, manages Claude API calls, and retrieve
 | `falkordb/queries.ts` | Cypher query builders |
 | `hts/delay-calculator.ts` | Typing delay calculation |
 | `hts/sleep-hours.ts` | Sleep hours enforcement |
+| `skills/registry.ts` | Skill lifecycle management and execution |
+| `skills/base-skill.ts` | Abstract base class for skills |
+| `skills/built-in/*.ts` | Built-in skills (knowledge-graph, persona, etc.) |
 
 ### LangGraph Workflow Pattern
 ```typescript
@@ -155,6 +203,52 @@ Types are defined in `@secondme/shared-types` package:
 - `ConversationMessage` - Claude API format
 - `HistoryConfig` - Feature configuration
 - `ConversationChunk` - Grouped message chunk
+
+### Skill System
+
+The orchestrator uses a skill-based architecture for context retrieval. Enable with `USE_SKILL_SYSTEM=true` in `.env`.
+
+**Built-in Skills:**
+| Skill | Description |
+|-------|-------------|
+| `knowledge-graph` | Retrieves context from FalkorDB (people, topics, events) |
+| `persona` | Gets persona style guide based on relationship type |
+| `style-profile` | Retrieves communication style profile |
+| `conversation-history` | Gets recent conversation with keyword chunking |
+
+**Skill Registry:**
+```typescript
+// Skills execute during context retrieval
+const skillResults = await skillRegistry.executeAll({
+  contactId: state.contactId,
+  messageContent: state.content,
+  relationshipType,
+});
+
+// Results provide structured data for Claude prompt
+const graphContext = skillResults.find(r => r.data?.graphContext)?.data;
+const persona = skillResults.find(r => r.data?.persona)?.data;
+```
+
+**Redis Keys:**
+```
+SKILLS:enabled           # Set of enabled skill IDs
+SKILLS:config:{skillId}  # JSON config per skill
+```
+
+**API Endpoints (port 3002):**
+```
+GET    /skills              # List all skills
+GET    /skills/:skillId     # Get skill details
+POST   /skills/:skillId/enable  # Enable skill
+POST   /skills/:skillId/disable # Disable skill
+PUT    /skills/:skillId/config  # Update config
+```
+
+**Adding New Skills:**
+1. Create skill class extending `BaseSkill` in `skills/built-in/`
+2. Implement `execute()` to return `SkillExecutionResult`
+3. Register in `skills/index.ts` via `registerBuiltInSkills()`
 
 ## Graph Worker Service
 

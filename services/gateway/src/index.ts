@@ -17,13 +17,21 @@ import { createServer } from 'http';
 import { whatsappClient } from './whatsapp/client.js';
 import { redisClient } from './redis/client.js';
 import { historyStore } from './redis/history-store.js';
-import { AuthHandler } from './whatsapp/auth.js';
-import { MessageHandler } from './whatsapp/message-handler.js';
+import { pairingStore } from './redis/pairing-store.js';
 import { MessageSender } from './whatsapp/sender.js';
 import { SessionManager } from './whatsapp/session-manager.js';
 import { ContactManager } from './whatsapp/contact-manager.js';
-import { SocketEventEmitter } from './socket/events.js';
 import { fetchChatMessages, WhatsAppDisconnectedError } from './whatsapp/message-fetcher.js';
+import {
+  RateLimiter,
+  GatewayMessageProcessor,
+  WhatsAppChannel,
+  TelegramChannel,
+  ChannelManager,
+  ChannelRouter,
+  type ChannelLogger,
+} from './channels/index.js';
+import { ContactLinker } from './contact-linking/index.js';
 import express from 'express';
 
 const PORT = process.env.GATEWAY_PORT || 3001;
@@ -44,13 +52,28 @@ export const io = new Server(httpServer, {
   },
 });
 
+// Channel logger adapter for console
+const logger: ChannelLogger = {
+  info: (msg: string, meta?: Record<string, unknown>) =>
+    console.log(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  warn: (msg: string, meta?: Record<string, unknown>) =>
+    console.warn(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  error: (msg: string, meta?: Record<string, unknown>) =>
+    console.error(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  debug: (msg: string, meta?: Record<string, unknown>) =>
+    console.debug(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+};
+
 // Initialize handlers
-let authHandler: AuthHandler;
-let _messageHandler: MessageHandler;
 let messageSender: MessageSender;
 let sessionManager: SessionManager;
 let contactManager: ContactManager;
-let _socketEmitter: SocketEventEmitter;
+let whatsappChannel: WhatsAppChannel;
+let messageProcessor: GatewayMessageProcessor;
+let rateLimiter: RateLimiter;
+let channelManager: ChannelManager;
+let channelRouter: ChannelRouter;
+let contactLinker: ContactLinker;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -99,6 +122,66 @@ app.post('/api/session/refresh', async (req, res) => {
     res.status(500).json({
       error: error.message || 'Failed to refresh session',
     });
+  }
+});
+
+// Channel status endpoint - get all registered channels with status
+app.get('/api/channels', async (req, res) => {
+  try {
+    if (!channelManager) {
+      return res.status(503).json({
+        error: 'Channel manager not initialized',
+      });
+    }
+
+    const status = await channelManager.getStatus();
+    res.json({ channels: status });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message || 'Failed to get channel status',
+    });
+  }
+});
+
+// Valid channel IDs for validation
+const VALID_CHANNEL_IDS = ['whatsapp', 'telegram'] as const;
+type ValidChannelId = (typeof VALID_CHANNEL_IDS)[number];
+
+function isValidChannelId(id: string): id is ValidChannelId {
+  return VALID_CHANNEL_IDS.includes(id as ValidChannelId);
+}
+
+// Enable a channel
+app.post('/api/channels/:channelId/enable', async (req, res) => {
+  const { channelId } = req.params;
+  try {
+    if (!channelManager) {
+      return res.status(503).json({ error: 'Channel manager not initialized' });
+    }
+    if (!isValidChannelId(channelId)) {
+      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+    }
+    await channelManager.enable(channelId);
+    res.json({ success: true, channelId, status: 'enabled' });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Failed to enable channel' });
+  }
+});
+
+// Disable a channel
+app.post('/api/channels/:channelId/disable', async (req, res) => {
+  const { channelId } = req.params;
+  try {
+    if (!channelManager) {
+      return res.status(503).json({ error: 'Channel manager not initialized' });
+    }
+    if (!isValidChannelId(channelId)) {
+      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+    }
+    await channelManager.disable(channelId);
+    res.json({ success: true, channelId, status: 'disabled' });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Failed to disable channel' });
   }
 });
 
@@ -187,10 +270,9 @@ io.on('connection', (socket) => {
   console.log(`[Gateway] Client connected: ${socket.id}`);
 
   // Send current connection status on connect
-  // Use whatsappClient.isReady() as primary source of truth to handle race condition
-  // where authHandler may be created after WhatsApp 'ready' event fires
+  // Use whatsappClient.isReady() as primary source of truth
   socket.emit('connection_status', {
-    status: whatsappClient.isReady() ? 'ready' : (authHandler?.getStatus() || 'disconnected'),
+    status: whatsappClient.isReady() ? 'ready' : 'disconnected',
     timestamp: Date.now(),
   });
 
@@ -251,8 +333,23 @@ async function startResponseConsumer() {
                 timestamp: Date.now(),
                 type: 'outgoing',
               });
+
+              // Emit message sent event
+              io.emit('message_sent', {
+                contactId,
+                messageId: result.messageId,
+                timestamp: Date.now(),
+                delayMs: result.actualDelayMs,
+              });
             } else {
               console.error(`[Gateway] Failed to send response to ${contactId}: ${result.error}`);
+
+              // Emit message failed event
+              io.emit('message_failed', {
+                contactId,
+                error: result.error,
+                timestamp: Date.now(),
+              });
             }
 
             // Delete response from queue
@@ -285,17 +382,136 @@ async function startGatewayService() {
     await redisClient.connect();
     console.log('[Gateway] Redis connected');
 
-    // Initialize WhatsApp client
-    console.log('[Gateway] Initializing WhatsApp client...');
-    await whatsappClient.initialize();
+    // Create event emitter callback
+    const emitEvent = (event: string, data: unknown) => io.emit(event, data);
 
-    // Initialize handlers after WhatsApp client is ready
+    // Initialize rate limiter
+    rateLimiter = new RateLimiter(
+      {
+        redis: redisClient.client,
+        logger,
+        emitEvent,
+        publish: (channel: string, message: string) => redisClient.publish(channel, message),
+      },
+      {
+        threshold: 10,
+        windowSeconds: 60,
+        autoPause: true,
+      }
+    );
+
+    // Initialize contact linker for cross-channel linking
+    contactLinker = new ContactLinker({
+      redis: redisClient.client,
+      pairingStore,
+    });
+    console.log('[Gateway] Contact linker initialized');
+
+    // Initialize message processor
+    messageProcessor = new GatewayMessageProcessor({
+      rateLimiter,
+      pairingStore,
+      historyStore,
+      redisClient,
+      logger,
+      emitEvent,
+      sendMessage: async (to: string, content: string) => {
+        await messageSender.sendMessage(to, content, { simulateTyping: true });
+      },
+      contactLinker,
+    });
+
+    // Initialize channel manager
+    channelManager = new ChannelManager(
+      { logger, emitEvent },
+      {
+        enabled: true,
+        contactLinkingEnabled: true, // Cross-channel contact linking enabled
+        defaultChannel: 'whatsapp',
+      }
+    );
+
+    // Initialize WhatsApp channel
+    // Note: The channel will use the already-initialized whatsappClient singleton
+    whatsappChannel = new WhatsAppChannel(
+      {
+        logger,
+        emitEvent,
+        config: { simulateTyping: true },
+      },
+      { autoConnect: false }
+    );
+
+    // Register channel with manager and enable it (this initializes WhatsApp client)
+    console.log('[Gateway] Initializing WhatsApp client...');
+    channelManager.register(whatsappChannel);
+    await channelManager.enable('whatsapp');
+
+    // Get the WhatsApp client after channel is initialized
     const client = whatsappClient.getClient();
-    authHandler = new AuthHandler(client);
-    _messageHandler = new MessageHandler(client);
     messageSender = new MessageSender(client);
     sessionManager = new SessionManager(client);
-    _socketEmitter = new SocketEventEmitter(io);
+
+    // Initialize Telegram channel if enabled
+    if (process.env['TELEGRAM_ENABLED'] === 'true') {
+      const telegramToken = process.env['TELEGRAM_BOT_TOKEN'];
+      if (!telegramToken) {
+        console.warn('[Gateway] TELEGRAM_ENABLED=true but TELEGRAM_BOT_TOKEN not set');
+      } else {
+        console.log('[Gateway] Initializing Telegram channel...');
+        const telegramChannel = new TelegramChannel(
+          { logger, emitEvent },
+          {
+            botToken: telegramToken,
+            skipGroups: true,
+          },
+          { autoConnect: false }
+        );
+
+        channelManager.register(telegramChannel);
+        await channelManager.enable('telegram');
+
+        // Log status changes
+        telegramChannel.onStatusChange((status, error) => {
+          console.log(`[Gateway] Telegram channel status: ${status}`, error ? `(${error})` : '');
+        });
+
+        console.log('[Gateway] Telegram channel registered');
+      }
+    }
+
+    // Initialize channel router
+    channelRouter = new ChannelRouter({
+      channelManager,
+      messageProcessor,
+      logger,
+    });
+
+    // Set up message routing for all registered channels
+    channelRouter.setupRoutes();
+
+    // Register status change handler for logging
+    whatsappChannel.onStatusChange((status, error) => {
+      console.log(`[Gateway] WhatsApp channel status: ${status}`, error ? `(${error})` : '');
+    });
+
+    // Handle fromMe messages via message_create event
+    // Note: The channel's 'message' handler ignores fromMe messages,
+    // so we handle them separately for the auto-pause functionality
+    client.on('message_create', async (message: { fromMe: boolean; to: string; id: { _serialized: string }; body: string }) => {
+      if (message.fromMe) {
+        const contactId = message.to;
+        // Ignore group messages
+        if (contactId.endsWith('@g.us')) return;
+
+        await messageProcessor.handleFromMe(
+          contactId,
+          message.id._serialized,
+          message.body,
+          'whatsapp'
+        );
+      }
+    });
 
     // Initialize session tracking when WhatsApp is ready
     client.on('ready', async () => {
@@ -352,7 +568,19 @@ async function shutdown() {
       sessionManager.stop();
     }
 
-    await whatsappClient.destroy();
+    // Remove routes before shutting down channels
+    if (channelRouter) {
+      channelRouter.removeRoutes();
+    }
+
+    // Shutdown channel manager (disconnects all channels)
+    if (channelManager) {
+      await channelManager.shutdown();
+    } else {
+      // Fallback to direct client destroy if manager not initialized
+      await whatsappClient.destroy();
+    }
+
     await redisClient.quit();
     httpServer.close(() => {
       console.log('[Gateway] Gateway service shut down');

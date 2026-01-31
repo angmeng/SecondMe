@@ -12,11 +12,17 @@ import {
   getPersonaById,
   getContactStyleProfile,
   type PersonaContext,
+  type ContactContext,
+  type StyleProfile,
 } from '../automem/recall.js';
 import { personaCache } from '../redis/persona-cache.js';
 import { getStyleProfileWithCache } from '../redis/style-cache.js';
 import { retrieveContext, isSemanticRagEnabled } from '../retrieval/index.js';
-import { historyCache } from '../history/index.js';
+import { historyCache, type ConversationMessage } from '../history/index.js';
+import { skillRegistry } from '../skills/index.js';
+
+// Feature flag for skill-based context retrieval
+const USE_SKILL_SYSTEM = process.env['USE_SKILL_SYSTEM'] === 'true';
 
 // Default user ID (single-user MVP)
 const DEFAULT_USER_ID = 'user-1';
@@ -307,4 +313,105 @@ async function getPersonaWithCache(
   }
 
   return { persona: persona || null, cached: false };
+}
+
+/**
+ * Skill-based context retrieval node
+ * Uses the skill registry to gather context from all enabled skills
+ */
+export async function graphAndPersonaNodeWithSkills(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  console.log(`[Graph+Persona Node (Skills)] Retrieving context for ${state.contactId}...`);
+
+  const startTime = Date.now();
+
+  try {
+    // Get contact info first (needed for relationship type)
+    const contactInfo = await getContactInfo(state.contactId);
+
+    // Determine relationship type
+    let relationshipType = contactInfo?.relationshipType || 'acquaintance';
+
+    // Check for high-confidence signal from router
+    if (state.relationshipSignal && state.relationshipSignal.confidence >= 0.9) {
+      console.log(
+        `[Graph+Persona Node (Skills)] Using high-confidence signal: ${state.relationshipSignal.type}`
+      );
+      relationshipType = state.relationshipSignal.type;
+    }
+
+    // Execute all enabled skills
+    const skillResults = await skillRegistry.executeAll({
+      contactId: state.contactId,
+      messageContent: state.content,
+      relationshipType,
+    });
+
+    // Extract structured data from results (using bracket notation for index signature access)
+    // Note: Skills also produce formatted context strings, but we use the structured data
+    // which gets formatted by the sonnet client (avoiding double-formatting)
+    const graphContextData = skillResults.find((r) => r.data?.['graphContext'])?.data;
+    const personaData = skillResults.find((r) => r.data?.['persona'])?.data;
+    const styleProfileData = skillResults.find((r) => r.data?.['styleProfile'])?.data;
+    const historyData = skillResults.find((r) => r.data?.['conversationHistory'])?.data;
+
+    const latency = Date.now() - startTime;
+
+    // Log skill execution stats
+    const enabledSkills = skillResults.map((r) => r.skillId).join(', ');
+    const totalLatency = skillResults.reduce((sum, r) => sum + (r.metadata?.latencyMs ?? 0), 0);
+
+    console.log(
+      `[Graph+Persona Node (Skills)] Retrieved in ${latency}ms from ${skillResults.length} skills (${enabledSkills}), total skill latency: ${totalLatency}ms`
+    );
+
+    // Build result object
+    const result: Partial<WorkflowState> = {
+      relationshipType,
+      graphContext: (graphContextData?.['graphContext'] as ContactContext) || { people: [], topics: [], events: [] },
+      graphQueryLatency: latency,
+      personaCached: (personaData?.['personaCached'] as boolean) ?? false,
+      conversationHistory: (historyData?.['conversationHistory'] as ConversationMessage[]) || [],
+      historyMessageCount: (historyData?.['historyMessageCount'] as number) || 0,
+    };
+
+    // Add optional properties only if they exist
+    if (contactInfo) {
+      result.contactInfo = contactInfo;
+    }
+    if (personaData?.['persona']) {
+      result.persona = personaData['persona'] as PersonaContext;
+    }
+    if (styleProfileData?.['styleProfile']) {
+      result.styleProfile = styleProfileData['styleProfile'] as StyleProfile;
+    }
+
+    return result;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Context retrieval failed';
+    console.error('[Graph+Persona Node (Skills)] Error:', error);
+    return {
+      graphContext: { people: [], topics: [], events: [] },
+      graphQueryLatency: Date.now() - startTime,
+      persona: {
+        id: 'fallback',
+        name: 'Default',
+        styleGuide: 'Keep responses brief and natural.',
+        tone: 'casual',
+        exampleMessages: [],
+        applicableTo: ['acquaintance'],
+      },
+      personaCached: false,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * Main context retrieval node - uses skills or legacy based on feature flag
+ */
+export async function contextRetrievalNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  if (USE_SKILL_SYSTEM) {
+    return graphAndPersonaNodeWithSkills(state);
+  }
+  return graphAndPersonaNode(state);
 }

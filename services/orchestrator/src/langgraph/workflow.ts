@@ -9,7 +9,7 @@ import { sonnetClient } from '../anthropic/sonnet-client.js';
 import { haikuClient } from '../anthropic/haiku-client.js';
 import { redisClient } from '../redis/client.js';
 import { routerNode } from './router-node.js';
-import { graphAndPersonaNode } from './graph-node.js';
+import { contextRetrievalNode } from './graph-node.js';
 import { type ContactContext, type PersonaContext, type ContactInfo, type StyleProfile } from '../automem/recall.js';
 import { type ConversationMessage } from '../history/index.js';
 import {
@@ -554,7 +554,7 @@ export function buildWorkflow() {
   workflow.addNode('check_sleep_hours', checkSleepHoursNode);
   workflow.addNode('router', routerNode);
   workflow.addNode('phatic_response', phaticResponseNode);
-  workflow.addNode('graph_query', graphAndPersonaNode);
+  workflow.addNode('graph_query', contextRetrievalNode);
   workflow.addNode('substantive_response', substantiveResponseNode);
   workflow.addNode('queue_response', queueResponseNode);
 

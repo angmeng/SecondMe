@@ -1,9 +1,17 @@
 /**
  * Redis Client for Server Actions
- * Used by Next.js Server Actions to interact with Redis for pause controls
+ * Used by Next.js Server Actions to interact with Redis for pause controls and pairing
  */
 
 import Redis from 'ioredis';
+import type {
+  PairingRequest,
+  ApprovedContact,
+  ContactTier,
+  LinkedContact,
+  StoredLinkedContact,
+} from '@secondme/shared-types';
+import { isStoredLinkedContact } from '@secondme/shared-types';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
@@ -311,6 +319,368 @@ class RedisClient {
       this.isInitialized = false;
       console.log('[Frontend Redis] Redis connection closed');
     }
+  }
+
+  // ============================================================
+  // Pairing Methods
+  // ============================================================
+
+  /**
+   * List pending pairing requests
+   */
+  async listPendingPairingRequests(limit: number = 100): Promise<PairingRequest[]> {
+    await this.ensureConnected();
+
+    const requests: PairingRequest[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        'PAIRING:pending:*',
+        'COUNT',
+        100
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        const values = await this.client.mget(keys);
+        for (const json of values) {
+          if (json) {
+            try {
+              const parsed = JSON.parse(json);
+              // Basic validation - check for contactId and status (code field was removed in simplified implementation)
+              if (parsed && parsed.contactId && parsed.status === 'pending') {
+                requests.push(parsed as PairingRequest);
+              }
+            } catch {
+              // Skip invalid entries
+            }
+          }
+        }
+      }
+
+      if (requests.length >= limit) break;
+    } while (cursor !== '0');
+
+    // Sort by requestedAt descending (newest first)
+    return requests.slice(0, limit).sort((a, b) => b.requestedAt - a.requestedAt);
+  }
+
+  /**
+   * List approved contacts
+   */
+  async listApprovedContacts(limit: number = 1000): Promise<ApprovedContact[]> {
+    await this.ensureConnected();
+
+    const contacts: ApprovedContact[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        'PAIRING:approved:*',
+        'COUNT',
+        100
+      );
+      cursor = nextCursor;
+
+      if (keys.length > 0) {
+        const values = await this.client.mget(keys);
+        for (const json of values) {
+          if (json) {
+            try {
+              const parsed = JSON.parse(json);
+              // Basic validation
+              if (parsed && parsed.contactId && parsed.approvedAt) {
+                contacts.push(parsed as ApprovedContact);
+              }
+            } catch {
+              // Skip invalid entries
+            }
+          }
+        }
+      }
+
+      if (contacts.length >= limit) break;
+    } while (cursor !== '0');
+
+    // Sort by approvedAt descending (newest first)
+    return contacts.slice(0, limit).sort((a, b) => b.approvedAt - a.approvedAt);
+  }
+
+  /**
+   * Get pending pairing request for a contact
+   */
+  async getPendingRequest(contactId: string): Promise<PairingRequest | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`PAIRING:pending:${contactId}`);
+    if (!json) return null;
+
+    try {
+      return JSON.parse(json) as PairingRequest;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get approved contact record
+   */
+  async getApprovedContact(contactId: string): Promise<ApprovedContact | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`PAIRING:approved:${contactId}`);
+    if (!json) return null;
+
+    try {
+      return JSON.parse(json) as ApprovedContact;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Approve a contact (admin action)
+   */
+  async approveContact(
+    contactId: string,
+    approvedBy: string,
+    tier: ContactTier = 'standard',
+    notes?: string
+  ): Promise<ApprovedContact> {
+    await this.ensureConnected();
+
+    // Get pending request to preserve contact info
+    const pending = await this.getPendingRequest(contactId);
+
+    const now = Date.now();
+    const approved: ApprovedContact = {
+      contactId,
+      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      ...(pending?.displayName && { displayName: pending.displayName }),
+      ...(pending?.profilePicUrl && { profilePicUrl: pending.profilePicUrl }),
+      approvedAt: now,
+      approvedBy,
+      tier,
+      ...(notes && { notes }),
+    };
+
+    // Set approved (no TTL - permanent)
+    await this.client.set(`PAIRING:approved:${contactId}`, JSON.stringify(approved));
+
+    // Delete pending request if exists
+    if (pending) {
+      await this.client.del(`PAIRING:pending:${contactId}`);
+    }
+
+    console.log(`[Frontend Redis] Contact ${contactId} approved by ${approvedBy} (tier: ${tier})`);
+
+    return approved;
+  }
+
+  /**
+   * Deny a contact (admin action) - sets cooldown period
+   */
+  async denyContact(
+    contactId: string,
+    deniedBy: string,
+    reason?: string,
+    cooldownHours: number = 24
+  ): Promise<void> {
+    await this.ensureConnected();
+
+    const pending = await this.getPendingRequest(contactId);
+
+    const now = Date.now();
+    const expiresAt = now + cooldownHours * 60 * 60 * 1000;
+    const ttlSeconds = cooldownHours * 60 * 60;
+
+    const denied = {
+      contactId,
+      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      ...(pending?.displayName && { displayName: pending.displayName }),
+      deniedAt: now,
+      deniedBy,
+      ...(reason && { reason }),
+      expiresAt,
+    };
+
+    // Set denied with TTL
+    await this.client.setex(`PAIRING:denied:${contactId}`, ttlSeconds, JSON.stringify(denied));
+
+    // Delete pending request if exists
+    if (pending) {
+      await this.client.del(`PAIRING:pending:${contactId}`);
+    }
+
+    console.log(
+      `[Frontend Redis] Contact ${contactId} denied by ${deniedBy} (cooldown: ${cooldownHours}h)`
+    );
+  }
+
+  /**
+   * Revoke approval (admin action)
+   */
+  async revokeApproval(contactId: string): Promise<void> {
+    await this.ensureConnected();
+    await this.client.del(`PAIRING:approved:${contactId}`);
+    console.log(`[Frontend Redis] Approval revoked for ${contactId}`);
+  }
+
+  /**
+   * Update approved contact tier
+   */
+  async updateContactTier(contactId: string, tier: ContactTier): Promise<ApprovedContact | null> {
+    await this.ensureConnected();
+
+    const contact = await this.getApprovedContact(contactId);
+    if (!contact) return null;
+
+    contact.tier = tier;
+    await this.client.set(`PAIRING:approved:${contactId}`, JSON.stringify(contact));
+
+    console.log(`[Frontend Redis] Updated tier for ${contactId} to ${tier}`);
+    return contact;
+  }
+
+  /**
+   * Check if contact is approved
+   */
+  async isContactApproved(contactId: string): Promise<boolean> {
+    await this.ensureConnected();
+    const exists = await this.client.exists(`PAIRING:approved:${contactId}`);
+    return exists === 1;
+  }
+
+  // ============================================================
+  // Contact Linking Methods
+  // ============================================================
+
+  /**
+   * Get linked channels for a contact
+   * Returns all channels that share the same phone number
+   */
+  async getLinkedChannels(contactId: string): Promise<LinkedContact['channels']> {
+    await this.ensureConnected();
+
+    // First, get the phone number for this contact
+    const phone = await this.client.get(`LINKED:contact:${contactId}`);
+    if (!phone) {
+      return [];
+    }
+
+    // Then get the linked contact record
+    const json = await this.client.get(`LINKED:phone:${phone}`);
+    if (!json) {
+      return [];
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (isStoredLinkedContact(parsed)) {
+        return parsed.channels;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get linked contact record by phone number
+   */
+  async getLinkedByPhone(phone: string): Promise<StoredLinkedContact | null> {
+    await this.ensureConnected();
+
+    const json = await this.client.get(`LINKED:phone:${phone}`);
+    if (!json) return null;
+
+    try {
+      const parsed: unknown = JSON.parse(json);
+      if (isStoredLinkedContact(parsed)) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Batch get linked channels for multiple contacts
+   * Uses Redis mget for efficiency to reduce N+1 queries
+   *
+   * @param contactIds - Array of contact IDs to look up
+   * @returns Map of contactId to their linked channels
+   */
+  async getLinkedChannelsBatch(
+    contactIds: string[]
+  ): Promise<Map<string, LinkedContact['channels']>> {
+    await this.ensureConnected();
+
+    const result = new Map<string, LinkedContact['channels']>();
+    if (contactIds.length === 0) return result;
+
+    // Step 1: Get all phone numbers in batch
+    const phoneResults = await this.client.mget(
+      contactIds.map((id) => `LINKED:contact:${id}`)
+    );
+
+    // Collect unique phones that exist
+    const phoneToContactIds = new Map<string, string[]>();
+    for (let i = 0; i < contactIds.length; i++) {
+      const phone = phoneResults[i];
+      const contactId = contactIds[i]!; // Safe: within bounds
+      if (phone) {
+        const existing = phoneToContactIds.get(phone) || [];
+        existing.push(contactId);
+        phoneToContactIds.set(phone, existing);
+      } else {
+        result.set(contactId, []);
+      }
+    }
+
+    if (phoneToContactIds.size === 0) return result;
+
+    // Step 2: Get all linked contact records in batch
+    const phones = Array.from(phoneToContactIds.keys());
+    const linkedResults = await this.client.mget(phones.map((p) => `LINKED:phone:${p}`));
+
+    // Map results back to contact IDs
+    for (let i = 0; i < phones.length; i++) {
+      const json = linkedResults[i];
+      const phone = phones[i]!; // Safe: within bounds
+      const contactIdsForPhone = phoneToContactIds.get(phone) || [];
+
+      if (json) {
+        try {
+          const parsed: unknown = JSON.parse(json);
+          if (isStoredLinkedContact(parsed)) {
+            for (const contactId of contactIdsForPhone) {
+              result.set(contactId, parsed.channels);
+            }
+          } else {
+            for (const contactId of contactIdsForPhone) {
+              result.set(contactId, []);
+            }
+          }
+        } catch {
+          for (const contactId of contactIdsForPhone) {
+            result.set(contactId, []);
+          }
+        }
+      } else {
+        for (const contactId of contactIdsForPhone) {
+          result.set(contactId, []);
+        }
+      }
+    }
+
+    return result;
   }
 }
 
