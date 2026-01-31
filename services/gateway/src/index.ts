@@ -17,13 +17,17 @@ import { createServer } from 'http';
 import { whatsappClient } from './whatsapp/client.js';
 import { redisClient } from './redis/client.js';
 import { historyStore } from './redis/history-store.js';
-import { AuthHandler } from './whatsapp/auth.js';
-import { MessageHandler } from './whatsapp/message-handler.js';
+import { pairingStore } from './redis/pairing-store.js';
 import { MessageSender } from './whatsapp/sender.js';
 import { SessionManager } from './whatsapp/session-manager.js';
 import { ContactManager } from './whatsapp/contact-manager.js';
-import { SocketEventEmitter } from './socket/events.js';
 import { fetchChatMessages, WhatsAppDisconnectedError } from './whatsapp/message-fetcher.js';
+import {
+  RateLimiter,
+  GatewayMessageProcessor,
+  WhatsAppChannel,
+  type ChannelLogger,
+} from './channels/index.js';
 import express from 'express';
 
 const PORT = process.env.GATEWAY_PORT || 3001;
@@ -44,13 +48,25 @@ export const io = new Server(httpServer, {
   },
 });
 
+// Channel logger adapter for console
+const logger: ChannelLogger = {
+  info: (msg: string, meta?: Record<string, unknown>) =>
+    console.log(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  warn: (msg: string, meta?: Record<string, unknown>) =>
+    console.warn(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  error: (msg: string, meta?: Record<string, unknown>) =>
+    console.error(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+  debug: (msg: string, meta?: Record<string, unknown>) =>
+    console.debug(`[Gateway] ${msg}`, meta ? JSON.stringify(meta) : ''),
+};
+
 // Initialize handlers
-let authHandler: AuthHandler;
-let _messageHandler: MessageHandler;
 let messageSender: MessageSender;
 let sessionManager: SessionManager;
 let contactManager: ContactManager;
-let _socketEmitter: SocketEventEmitter;
+let whatsappChannel: WhatsAppChannel;
+let messageProcessor: GatewayMessageProcessor;
+let rateLimiter: RateLimiter;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -187,10 +203,9 @@ io.on('connection', (socket) => {
   console.log(`[Gateway] Client connected: ${socket.id}`);
 
   // Send current connection status on connect
-  // Use whatsappClient.isReady() as primary source of truth to handle race condition
-  // where authHandler may be created after WhatsApp 'ready' event fires
+  // Use whatsappClient.isReady() as primary source of truth
   socket.emit('connection_status', {
-    status: whatsappClient.isReady() ? 'ready' : (authHandler?.getStatus() || 'disconnected'),
+    status: whatsappClient.isReady() ? 'ready' : 'disconnected',
     timestamp: Date.now(),
   });
 
@@ -251,8 +266,23 @@ async function startResponseConsumer() {
                 timestamp: Date.now(),
                 type: 'outgoing',
               });
+
+              // Emit message sent event
+              io.emit('message_sent', {
+                contactId,
+                messageId: result.messageId,
+                timestamp: Date.now(),
+                delayMs: result.actualDelayMs,
+              });
             } else {
               console.error(`[Gateway] Failed to send response to ${contactId}: ${result.error}`);
+
+              // Emit message failed event
+              io.emit('message_failed', {
+                contactId,
+                error: result.error,
+                timestamp: Date.now(),
+              });
             }
 
             // Delete response from queue
@@ -291,11 +321,94 @@ async function startGatewayService() {
 
     // Initialize handlers after WhatsApp client is ready
     const client = whatsappClient.getClient();
-    authHandler = new AuthHandler(client);
     messageSender = new MessageSender(client);
-    _messageHandler = new MessageHandler(client, messageSender);
     sessionManager = new SessionManager(client);
-    _socketEmitter = new SocketEventEmitter(io);
+
+    // Create event emitter callback
+    const emitEvent = (event: string, data: unknown) => io.emit(event, data);
+
+    // Initialize rate limiter
+    rateLimiter = new RateLimiter(
+      {
+        redis: redisClient.client,
+        logger,
+        emitEvent,
+        publish: (channel: string, message: string) => redisClient.publish(channel, message),
+      },
+      {
+        threshold: 10,
+        windowSeconds: 60,
+        autoPause: true,
+      }
+    );
+
+    // Initialize message processor
+    messageProcessor = new GatewayMessageProcessor({
+      rateLimiter,
+      pairingStore,
+      historyStore,
+      redisClient,
+      logger,
+      emitEvent,
+      sendMessage: async (to: string, content: string) => {
+        await messageSender.sendMessage(to, content, { simulateTyping: true });
+      },
+    });
+
+    // Initialize WhatsApp channel
+    // Note: The channel will use the already-initialized whatsappClient singleton
+    whatsappChannel = new WhatsAppChannel(
+      {
+        logger,
+        emitEvent,
+        config: { simulateTyping: true },
+      },
+      { autoConnect: false }
+    );
+
+    // Register message handler BEFORE connecting
+    // The channel converts raw WhatsApp messages to ChannelMessage format
+    whatsappChannel.onMessage(async (channelMsg) => {
+      // Get contact name from WhatsApp
+      let contactName = 'Unknown';
+      try {
+        const contact = await whatsappChannel.getContact(channelMsg.contactId);
+        if (contact && contact.displayName) {
+          contactName = contact.displayName;
+        }
+      } catch {
+        // Use default name on error
+      }
+
+      await messageProcessor.processMessage(channelMsg, contactName);
+    });
+
+    // Register status change handler
+    whatsappChannel.onStatusChange((status, error) => {
+      console.log(`[Gateway] WhatsApp channel status: ${status}`, error ? `(${error})` : '');
+    });
+
+    // Connect the channel - this sets up event handlers on the existing client
+    // Since whatsappClient is already initialized, this just hooks up handlers
+    await whatsappChannel.connect();
+
+    // Handle fromMe messages via message_create event
+    // Note: The channel's 'message' handler ignores fromMe messages,
+    // so we handle them separately for the auto-pause functionality
+    client.on('message_create', async (message: { fromMe: boolean; to: string; id: { _serialized: string }; body: string }) => {
+      if (message.fromMe) {
+        const contactId = message.to;
+        // Ignore group messages
+        if (contactId.endsWith('@g.us')) return;
+
+        await messageProcessor.handleFromMe(
+          contactId,
+          message.id._serialized,
+          message.body,
+          'whatsapp'
+        );
+      }
+    });
 
     // Initialize session tracking when WhatsApp is ready
     client.on('ready', async () => {

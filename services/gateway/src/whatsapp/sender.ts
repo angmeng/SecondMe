@@ -5,7 +5,6 @@
  */
 
 import { Client } from 'whatsapp-web.js';
-import { io } from '../index.js';
 
 export interface SendMessageOptions {
   /** Custom typing delay in ms (from HTS calculator) */
@@ -72,25 +71,10 @@ export class MessageSender {
           console.log(`[Gateway Sender] Phase 2: Typing for ${typingTime}ms`);
 
           await this.startTyping(contactId);
-
-          io.emit('typing_status', {
-            contactId,
-            isTyping: true,
-            phase: 'typing',
-            timestamp: Date.now(),
-          });
-
           await this.sleep(typingTime);
         } else {
           // Simple typing simulation (no think phase)
           await this.startTyping(contactId);
-
-          io.emit('typing_status', {
-            contactId,
-            isTyping: true,
-            timestamp: Date.now(),
-          });
-
           await this.sleep(typingDelay);
         }
       }
@@ -106,26 +90,12 @@ export class MessageSender {
       // Stop typing indicator
       if (simulateTyping) {
         await this.stopTyping(contactId);
-
-        io.emit('typing_status', {
-          contactId,
-          isTyping: false,
-          timestamp: Date.now(),
-        });
       }
 
       const actualDelayMs = Date.now() - startTime;
       console.log(
         `[Gateway Sender] Message sent successfully to ${contactId}: ${message.id._serialized} (actual delay: ${actualDelayMs}ms)`
       );
-
-      // Emit message sent event
-      io.emit('message_sent', {
-        contactId,
-        messageId: message.id._serialized,
-        timestamp: Date.now(),
-        delayMs: actualDelayMs,
-      });
 
       return {
         success: true,
@@ -137,18 +107,6 @@ export class MessageSender {
 
       // Stop typing on error
       await this.stopTyping(contactId);
-
-      io.emit('typing_status', {
-        contactId,
-        isTyping: false,
-        timestamp: Date.now(),
-      });
-
-      io.emit('message_failed', {
-        contactId,
-        error: error.message,
-        timestamp: Date.now(),
-      });
 
       return {
         success: false,
