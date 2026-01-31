@@ -6,6 +6,7 @@
 import type { StoredMessage } from './history.js';
 import type { PairingRequest, ApprovedContact, DeniedContact } from './pairing.js';
 import type { SkillManifest, SkillConfigField, SkillInfo } from './skills.js';
+import type { ChannelMessage, QueuedMessage, ChannelId } from './channels.js';
 
 /**
  * Type guard for StoredMessage
@@ -207,5 +208,101 @@ export function isSkillInfo(obj: unknown): obj is SkillInfo {
     (info['lastHealthCheck'] === undefined || typeof info['lastHealthCheck'] === 'number') &&
     typeof info['config'] === 'object' &&
     info['config'] !== null
+  );
+}
+
+/**
+ * Valid channel identifiers
+ */
+const VALID_CHANNEL_IDS: readonly ChannelId[] = ['whatsapp', 'telegram', 'discord', 'slack'];
+
+/**
+ * Type guard for ChannelId
+ * Validates that a string is a valid channel identifier
+ *
+ * @param value - Unknown value to validate
+ * @returns true if value is a valid ChannelId
+ */
+export function isChannelId(value: unknown): value is ChannelId {
+  return typeof value === 'string' && VALID_CHANNEL_IDS.includes(value as ChannelId);
+}
+
+/**
+ * Type guard for ChannelMessage
+ * Validates that an unknown object has the correct shape for ChannelMessage
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid ChannelMessage
+ */
+export function isChannelMessage(obj: unknown): obj is ChannelMessage {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const msg = obj as Record<string, unknown>;
+
+  return (
+    typeof msg['id'] === 'string' &&
+    msg['id'].length > 0 &&  // Non-empty string
+    msg['version'] === 2 &&
+    isChannelId(msg['channelId']) &&
+    typeof msg['contactId'] === 'string' &&
+    msg['contactId'].length > 0 &&  // Non-empty string
+    typeof msg['content'] === 'string' &&
+    typeof msg['timestamp'] === 'number' &&
+    // Optional fields (must be undefined or non-null correct type)
+    (msg['normalizedContactId'] === undefined || typeof msg['normalizedContactId'] === 'string') &&
+    (msg['mediaType'] === undefined ||
+      msg['mediaType'] === 'text' ||
+      msg['mediaType'] === 'image' ||
+      msg['mediaType'] === 'audio' ||
+      msg['mediaType'] === 'video' ||
+      msg['mediaType'] === 'document') &&
+    (msg['mediaUrl'] === undefined || typeof msg['mediaUrl'] === 'string') &&
+    (msg['replyTo'] === undefined || typeof msg['replyTo'] === 'string') &&
+    (msg['metadata'] === undefined || (typeof msg['metadata'] === 'object' && msg['metadata'] !== null))
+  );
+}
+
+/**
+ * Type guard for QueuedMessage
+ * Validates that an unknown object has the correct shape for QueuedMessage
+ * Supports both v1 (legacy WhatsApp-only) and v2 (multi-channel) formats
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid QueuedMessage
+ */
+export function isQueuedMessage(obj: unknown): obj is QueuedMessage {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const msg = obj as Record<string, unknown>;
+
+  // Version can be 1 or 2 (or undefined for legacy v1 messages)
+  const version = msg['version'];
+  if (version !== undefined && version !== 1 && version !== 2) {
+    return false;
+  }
+
+  // v2 messages require channelId, v1/undefined (legacy) messages don't
+  const isV1OrLegacy = version === 1 || version === undefined;
+  const hasValidChannelId = isV1OrLegacy ? true : isChannelId(msg['channelId']);
+
+  if (!hasValidChannelId) {
+    return false;
+  }
+
+  return (
+    typeof msg['messageId'] === 'string' &&
+    msg['messageId'].length > 0 &&  // Non-empty string
+    typeof msg['contactId'] === 'string' &&
+    msg['contactId'].length > 0 &&  // Non-empty string
+    typeof msg['content'] === 'string' &&
+    typeof msg['timestamp'] === 'number' &&
+    // Optional fields (must be undefined or non-null correct type)
+    (msg['normalizedContactId'] === undefined || typeof msg['normalizedContactId'] === 'string') &&
+    (msg['contactName'] === undefined || typeof msg['contactName'] === 'string') &&
+    (msg['metadata'] === undefined || (typeof msg['metadata'] === 'object' && msg['metadata'] !== null))
   );
 }
