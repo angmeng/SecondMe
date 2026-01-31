@@ -40,6 +40,9 @@ export {
   isSkillConfigField,
   isSkillManifest,
   isSkillInfo,
+  isChannelId,
+  isChannelMessage,
+  isQueuedMessage,
 } from './guards.js';
 
 // Security types
@@ -66,3 +69,21 @@ export type {
 } from './skills.js';
 
 export { DEFAULT_SKILLS_CONFIG } from './skills.js';
+
+// Channel types
+export type {
+  ChannelId,
+  ChannelStatus,
+  ChannelMessage,
+  QueuedMessage,
+  ChannelInfo,
+  MessageContent,
+  SendResult,
+  ChannelContact,
+  LinkedContact,
+  Channel,
+  SendOptions,
+  ChannelManagerConfig,
+} from './channels.js';
+
+export { DEFAULT_CHANNEL_CONFIG } from './channels.js';
