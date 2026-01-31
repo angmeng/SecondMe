@@ -24,6 +24,7 @@ export type {
   DeniedContact,
   PairingConfig,
   CreatePairingResult,
+  EnrichedApprovedContact,
 } from './pairing.js';
 
 export { DEFAULT_PAIRING_CONFIG } from './pairing.js';
@@ -77,13 +78,16 @@ export type {
   ChannelMessage,
   QueuedMessage,
   ChannelInfo,
+  ManagedChannelInfo,
   MessageContent,
   SendResult,
   ChannelContact,
   LinkedContact,
+  StoredLinkedContact,
+  ResolvedContact,
   Channel,
   SendOptions,
   ChannelManagerConfig,
 } from './channels.js';
 
-export { DEFAULT_CHANNEL_CONFIG } from './channels.js';
+export { DEFAULT_CHANNEL_CONFIG, isStoredLinkedContact } from './channels.js';

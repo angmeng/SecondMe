@@ -3,7 +3,7 @@
 **Created**: 2026-01-30
 **Updated**: 2026-01-31
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Phase 3 In Progress (Telegram Core Complete)
+**Status**: Phase 3 In Progress (Dashboard Complete, Task 3.1.6 Remaining)
 
 ---
 
@@ -1424,7 +1424,7 @@ export class TelegramChannel extends BaseChannel {
 - [x] Token format validation (fail fast on invalid tokens)
 - [x] Contact caching from incoming messages
 - [x] Graceful disconnect with cache cleanup
-- [ ] Dashboard shows Telegram connection status (Task 3.1.5)
+- [x] Dashboard shows Telegram connection status (Task 3.1.5) ✅
 - [ ] Graceful handling of rate limits (deferred)
 
 ##### Code Review Fixes (2026-01-31)
@@ -1452,50 +1452,76 @@ export class TelegramChannel extends BaseChannel {
 
 ---
 
-#### Task 3.1.5: Multi-Channel Dashboard
+#### Task 3.1.5: Multi-Channel Dashboard ✅ COMPLETE
 
+**Completed**: 2026-01-31
 **Scope**: Update dashboard for multi-channel support
 
-**Files to create**:
-- `frontend/src/components/ChannelStatusCard.tsx`
-- `frontend/src/app/api/channels/route.ts`
-- `frontend/src/app/api/channels/[channelId]/route.ts`
+**Files created**:
+- `frontend/src/components/ChannelStatusCard.tsx` - Single channel card with icon, status, toggle
+- `frontend/src/components/ChannelStatusGrid.tsx` - Grid container with real-time updates
+- `frontend/src/components/ui/ChannelBadge.tsx` - Reusable channel badge component
+- `frontend/src/app/api/channels/route.ts` - List channels API
+- `frontend/src/app/api/channels/[channelId]/route.ts` - Enable/disable channel API
 
-**Files to modify**:
-- `frontend/src/app/page.tsx` (show channel status cards)
-- `frontend/src/app/pairing/page.tsx` (show channel badges)
-- `frontend/src/components/Navigation.tsx` (channels link)
+**Files modified**:
+- `frontend/src/app/page.tsx` - Added ChannelStatusGrid section
+- `frontend/src/components/PairingRequests.tsx` - Added channel badges
+- `services/gateway/src/index.ts` - Added enable/disable endpoints
+- `packages/shared-types/src/channels.ts` - Added ManagedChannelInfo type
 
-**API Routes**:
+**Gateway API Routes**:
 ```
-GET    /api/channels              # List all channels with status
-GET    /api/channels/:id          # Get channel details
-POST   /api/channels/:id/connect  # Connect channel
-POST   /api/channels/:id/disconnect # Disconnect channel
-POST   /api/channels/:id/pause    # Pause channel
+GET    /api/channels                    # List all channels with status
+POST   /api/channels/:id/enable         # Enable channel
+POST   /api/channels/:id/disable        # Disable channel
+```
+
+**Frontend API Routes**:
+```
+GET    /api/channels                    # Proxy to gateway
+POST   /api/channels/:id                # Enable/disable via action param
 ```
 
 **UI Components**:
 
 1. **ChannelStatusCard.tsx**
-   - Channel icon + name
-   - Connection status indicator
-   - Contact count
-   - Connect/Disconnect button
-   - Pause toggle
-   - Last activity timestamp
+   - WhatsApp/Telegram icons (inline SVG)
+   - Connection status with semantic colors (success/warning/error)
+   - Contact count display
+   - Enable/Disable toggle button
+   - Error message display
 
-2. **Updated Pairing Page**
+2. **ChannelStatusGrid.tsx**
+   - Fetches initial state from API
+   - Real-time updates via Socket.io `channel_manager_status`
+   - Loading skeleton state
+   - Error state with retry button
+   - Toast notifications for toggle success/failure
+
+3. **ChannelBadge.tsx** (extracted to `ui/`)
+   - Supports all channel types (whatsapp, telegram, discord, slack)
+   - Consistent styling with semantic colors
+   - Reusable across components
+
+4. **Updated Pairing Page**
    - Channel badge on each request
-   - Filter by channel
-   - Bulk actions per channel
+   - Uses shared ChannelBadge component
+
+**Implementation Highlights**:
+- Type-safe with `ManagedChannelInfo` from shared-types
+- Channel ID validation in gateway endpoints
+- Toast notifications via ToastContext
+- Error recovery with retry functionality
+- Consistent dark mode support
 
 **Acceptance Criteria**:
-- [ ] All channels shown in dashboard
-- [ ] Per-channel connect/disconnect controls
-- [ ] Per-channel pause controls
-- [ ] Pairing requests show channel badge
-- [ ] Real-time status updates via Socket.io
+- [x] All channels shown in dashboard
+- [x] Per-channel enable/disable controls
+- [x] Pairing requests show channel badge
+- [x] Real-time status updates via Socket.io
+- [x] Error handling with user feedback
+- [x] Loading and error states
 
 ---
 

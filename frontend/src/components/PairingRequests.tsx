@@ -15,6 +15,7 @@ import { socketClient } from '@/lib/socket';
 import { useToast } from '@/contexts/ToastContext';
 import { getErrorMessage } from '@/lib/errors';
 import Avatar from '@/components/ui/Avatar';
+import ChannelBadge from '@/components/ui/ChannelBadge';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import type { PairingRequest, ContactTier } from '@secondme/shared-types';
 
@@ -226,9 +227,12 @@ export default function PairingRequests({ onRequestProcessed }: PairingRequestsP
             <div className="flex items-center gap-3">
               <Avatar name={request.displayName || request.phoneNumber} size="lg" />
               <div>
-                <h3 className="font-medium text-slate-900 dark:text-slate-100">
-                  {request.displayName || 'Unknown'}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium text-slate-900 dark:text-slate-100">
+                    {request.displayName || 'Unknown'}
+                  </h3>
+                  <ChannelBadge channelId={request.channelId} />
+                </div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   {formatPhoneNumber(request.contactId)}
                 </p>

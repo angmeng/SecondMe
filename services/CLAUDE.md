@@ -92,9 +92,26 @@ The gateway uses a channel abstraction to support multiple messaging platforms.
 - Token validation on construction (must contain `:`)
 - Contact caching from incoming messages
 
+**Channel Manager API**:
+```
+GET    /api/channels                    # List all channels with status
+POST   /api/channels/:channelId/enable  # Enable a channel
+POST   /api/channels/:channelId/disable # Disable a channel
+```
+
+**Socket.io Events**:
+- `channel_manager_status` - Emitted when channel status changes
+  - Payload: `{ channels: ManagedChannelInfo[], timestamp: number }`
+
+**Shared Types** (from `@secondme/shared-types`):
+- `ManagedChannelInfo` - Channel info with `enabled` field for dashboard
+- `ChannelInfo` - Base channel information
+- `ChannelStatus` - Connection status enum (`connected` | `connecting` | `disconnected` | `error`)
+
 **Environment Variables**:
 ```bash
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI...  # From @BotFather
+TELEGRAM_ENABLED=true                       # Enable Telegram channel
 ```
 
 ## Orchestrator Service
