@@ -8,7 +8,7 @@
 
 import { Bot, type Context } from 'grammy';
 import { BaseChannel } from '../base-channel.js';
-import type { MessageContent, SendResult, ChannelContact } from '@secondme/shared-types';
+import type { MessageContent, SendResult, ChannelContact, DownloadedMedia } from '@secondme/shared-types';
 import type { ChannelDependencies, ChannelInitOptions } from '../types.js';
 import { normalizeTelegramContactId, isTelegramGroup } from './normalizer.js';
 
@@ -34,6 +34,16 @@ export interface TelegramChannelDeps extends ChannelDependencies {
  * Telegram Channel Adapter
  * Implements the Channel interface for Telegram messaging.
  */
+/**
+ * Default retry configuration for media downloads
+ */
+const DEFAULT_RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 500,
+  maxDelayMs: 5000,
+  backoffMultiplier: 2,
+};
+
 export class TelegramChannel extends BaseChannel {
   readonly id = 'telegram' as const;
   readonly displayName = 'Telegram';
@@ -369,6 +379,190 @@ export class TelegramChannel extends BaseChannel {
     // Telegram users don't share phone numbers by default
     return null;
   }
+
+  // --- Media Methods ---
+
+  /**
+   * Download media from Telegram using file_id with retry logic
+   * Telegram provides file_id which can be used to download via Bot API
+   *
+   * @param fileId - The Telegram file_id
+   * @returns Downloaded media with base64 data and mime type, or null if download fails
+   */
+  async downloadMedia(fileId: string): Promise<DownloadedMedia | null> {
+    return this.downloadMediaWithRetry(fileId, 0);
+  }
+
+  /**
+   * Internal method with retry logic for media download
+   */
+  private async downloadMediaWithRetry(
+    fileId: string,
+    attempt: number
+  ): Promise<DownloadedMedia | null> {
+    try {
+      // Get file info from Telegram
+      const file = await this.bot.api.getFile(fileId);
+
+      if (!file.file_path) {
+        this.logger.warn('No file_path in Telegram file response', {
+          channelId: this.id,
+          fileId,
+        });
+        return null;
+      }
+
+      // Download the file from Telegram servers
+      const url = `https://api.telegram.org/file/bot${this.config.botToken}/${file.file_path}`;
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        // Check if retryable status code
+        if (this.isRetryableStatusCode(response.status) && attempt < DEFAULT_RETRY_CONFIG.maxRetries) {
+          return this.retryDownload(fileId, attempt, `HTTP ${response.status}`);
+        }
+
+        this.logger.error('Failed to download Telegram file', {
+          channelId: this.id,
+          fileId,
+          status: response.status,
+          attempt: attempt + 1,
+        });
+        return null;
+      }
+
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+
+      // Determine MIME type from file path
+      const mimeType = this.getMimeTypeFromPath(file.file_path);
+      const sizeBytes = buffer.byteLength;
+
+      this.logger.info('Media downloaded successfully', {
+        channelId: this.id,
+        fileId,
+        mimeType,
+        sizeKB: Math.round(sizeBytes / 1024),
+        attempts: attempt + 1,
+      });
+
+      return {
+        base64,
+        mimeType,
+        sizeBytes,
+      };
+    } catch (error) {
+      // Check if error is retryable (network errors, timeouts)
+      if (this.isRetryableError(error) && attempt < DEFAULT_RETRY_CONFIG.maxRetries) {
+        return this.retryDownload(
+          fileId,
+          attempt,
+          error instanceof Error ? error.message : 'Unknown error'
+        );
+      }
+
+      this.logger.error('Failed to download Telegram media', {
+        channelId: this.id,
+        fileId,
+        error: error instanceof Error ? error.message : String(error),
+        attempt: attempt + 1,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Retry media download with exponential backoff
+   */
+  private async retryDownload(
+    fileId: string,
+    currentAttempt: number,
+    reason: string
+  ): Promise<DownloadedMedia | null> {
+    const nextAttempt = currentAttempt + 1;
+    const delay = Math.min(
+      DEFAULT_RETRY_CONFIG.initialDelayMs *
+        Math.pow(DEFAULT_RETRY_CONFIG.backoffMultiplier, currentAttempt),
+      DEFAULT_RETRY_CONFIG.maxDelayMs
+    );
+
+    this.logger.warn('Retrying Telegram media download', {
+      channelId: this.id,
+      fileId,
+      attempt: nextAttempt,
+      maxRetries: DEFAULT_RETRY_CONFIG.maxRetries,
+      delayMs: delay,
+      reason,
+    });
+
+    await this.sleep(delay);
+    return this.downloadMediaWithRetry(fileId, nextAttempt);
+  }
+
+  /**
+   * Check if HTTP status code is retryable
+   */
+  private isRetryableStatusCode(status: number): boolean {
+    // Retry on server errors (5xx) and rate limiting (429)
+    return status >= 500 || status === 429;
+  }
+
+  /**
+   * Check if error is retryable (network issues, timeouts)
+   */
+  private isRetryableError(error: unknown): boolean {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      return (
+        message.includes('network') ||
+        message.includes('timeout') ||
+        message.includes('econnreset') ||
+        message.includes('econnrefused') ||
+        message.includes('enotfound') ||
+        message.includes('socket hang up') ||
+        message.includes('fetch failed')
+      );
+    }
+    return false;
+  }
+
+  /**
+   * Sleep helper for retry delays
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Determine MIME type from Telegram file path
+   */
+  private getMimeTypeFromPath(filePath: string): string {
+    const ext = filePath.split('.').pop()?.toLowerCase();
+
+    const mimeTypes: Record<string, string> = {
+      // Audio
+      ogg: 'audio/ogg',
+      oga: 'audio/ogg',
+      mp3: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      wav: 'audio/wav',
+      // Image
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      // Video
+      mp4: 'video/mp4',
+      webm: 'video/webm',
+      // Document
+      pdf: 'application/pdf',
+    };
+
+    return mimeTypes[ext || ''] || 'application/octet-stream';
+  }
+
+  // --- Private Methods ---
 
   /**
    * Extract numeric chat ID from normalized contact ID

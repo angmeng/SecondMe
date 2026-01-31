@@ -13,11 +13,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
-    "@secondme/shared-types": "*",
     "@langchain/langgraph": "^1.0.7",
+    "@secondme/shared-types": "*",
     "dotenv": "^17.2.3",
     "express": "^4.22.1",
     "ioredis": "^5.9.1",
+    "openai": "^4.104.0",
     "winston": "^3.17.0"
   },
   "devDependencies": {

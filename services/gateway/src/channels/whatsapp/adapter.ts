@@ -19,6 +19,7 @@ import type {
   MessageContent,
   SendResult,
   ChannelContact,
+  DownloadedMedia,
 } from '@secondme/shared-types';
 import type { ChannelDependencies, ChannelInitOptions } from '../types.js';
 import { normalizeWhatsAppContactId, isGroupChat, isStatusBroadcast } from './normalizer.js';
@@ -91,6 +92,12 @@ export class WhatsAppChannel extends BaseChannel {
   // Track typing indicator timeouts for cleanup on disconnect
   private typingTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
+  // Cache recent messages for media download (TTL: 5 minutes)
+  private messageCache: Map<string, { message: WWJSMessage; timestamp: number }> = new Map();
+  private readonly MESSAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+  private readonly MESSAGE_CACHE_CLEANUP_INTERVAL_MS = 60 * 1000; // 1 minute
+  private cacheCleanupInterval: NodeJS.Timeout | null = null;
+
   constructor(deps: WhatsAppChannelDeps, options?: ChannelInitOptions) {
     super(deps, options);
     // Use mock wrapper if provided (for testing), otherwise use singleton
@@ -117,6 +124,9 @@ export class WhatsAppChannel extends BaseChannel {
       // Set up event handlers
       this.setupEventHandlers();
 
+      // Start periodic cache cleanup
+      this.startCacheCleanupInterval();
+
       // Check if already ready (client may have connected during initialize)
       if (this.clientWrapper.isReady()) {
         this.setStatus('connected');
@@ -142,6 +152,8 @@ export class WhatsAppChannel extends BaseChannel {
     try {
       this.removeEventHandlers();
       this.clearTypingTimeouts();
+      this.stopCacheCleanupInterval();
+      this.messageCache.clear();
       await this.clientWrapper.destroy();
       this.wwjsClient = null;
       this.messageSender = null;
@@ -153,6 +165,8 @@ export class WhatsAppChannel extends BaseChannel {
         error: error instanceof Error ? error.message : String(error),
       });
       // Still mark as disconnected even if cleanup failed
+      this.stopCacheCleanupInterval();
+      this.messageCache.clear();
       this.setStatus('disconnected');
     }
   }
@@ -321,6 +335,135 @@ export class WhatsAppChannel extends BaseChannel {
     return normalizeWhatsAppContactId(contactId);
   }
 
+  // --- Media Methods ---
+
+  /**
+   * Download media from a WhatsApp message
+   * Uses cached message object to call downloadMedia() which returns base64 data
+   *
+   * @param messageId - The serialized message ID
+   * @returns Downloaded media with base64 data and mime type, or null if download fails
+   */
+  async downloadMedia(messageId: string): Promise<DownloadedMedia | null> {
+    // Get message from cache
+    const cached = this.messageCache.get(messageId);
+    if (!cached) {
+      this.logger.warn('Message not found in cache for media download', {
+        channelId: this.id,
+        messageId,
+      });
+      return null;
+    }
+
+    const { message } = cached;
+
+    if (!message.hasMedia) {
+      this.logger.debug('Message has no media', {
+        channelId: this.id,
+        messageId,
+      });
+      return null;
+    }
+
+    try {
+      // whatsapp-web.js downloadMedia() returns MessageMedia with data (base64) and mimetype
+      const media = await message.downloadMedia();
+      if (!media) {
+        this.logger.warn('Failed to download media (null returned)', {
+          channelId: this.id,
+          messageId,
+        });
+        return null;
+      }
+
+      // Calculate approximate size from base64 (3/4 ratio)
+      const sizeBytes = Math.floor((media.data.length * 3) / 4);
+
+      this.logger.info('Media downloaded successfully', {
+        channelId: this.id,
+        messageId,
+        mimeType: media.mimetype,
+        sizeKB: Math.round(sizeBytes / 1024),
+      });
+
+      return {
+        base64: media.data,
+        mimeType: media.mimetype,
+        sizeBytes,
+      };
+    } catch (error) {
+      this.logger.error('Failed to download media', {
+        channelId: this.id,
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Cache a message for later media download
+   * Messages are cached when received and cleared after TTL
+   */
+  private cacheMessage(message: WWJSMessage): void {
+    const messageId = message.id._serialized;
+    this.messageCache.set(messageId, {
+      message,
+      timestamp: Date.now(),
+    });
+    // Note: Individual TTL timeouts removed in favor of periodic cleanup interval
+    // This reduces timer overhead for high-volume scenarios
+  }
+
+  /**
+   * Start periodic cache cleanup interval
+   */
+  private startCacheCleanupInterval(): void {
+    if (this.cacheCleanupInterval) {
+      return; // Already running
+    }
+
+    this.cacheCleanupInterval = setInterval(() => {
+      const cleanedCount = this.cleanupMessageCache();
+      if (cleanedCount > 0) {
+        this.logger.debug('Message cache cleanup', {
+          channelId: this.id,
+          cleanedCount,
+          remainingCount: this.messageCache.size,
+        });
+      }
+    }, this.MESSAGE_CACHE_CLEANUP_INTERVAL_MS);
+
+    // Don't keep Node.js alive just for cleanup
+    this.cacheCleanupInterval.unref();
+  }
+
+  /**
+   * Stop periodic cache cleanup interval
+   */
+  private stopCacheCleanupInterval(): void {
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+  }
+
+  /**
+   * Clean up expired entries from message cache
+   * @returns Number of entries cleaned up
+   */
+  private cleanupMessageCache(): number {
+    const now = Date.now();
+    let cleanedCount = 0;
+    for (const [id, entry] of this.messageCache.entries()) {
+      if (now - entry.timestamp > this.MESSAGE_CACHE_TTL_MS) {
+        this.messageCache.delete(id);
+        cleanedCount++;
+      }
+    }
+    return cleanedCount;
+  }
+
   // --- Private Methods ---
 
   /**
@@ -407,10 +550,8 @@ export class WhatsAppChannel extends BaseChannel {
    * Handle an incoming WhatsApp message
    * Converts to ChannelMessage format and emits to registered handlers
    *
-   * Note: Media URL extraction is not implemented because whatsapp-web.js
-   * requires downloading media via message.downloadMedia() which returns
-   * base64 data, not a URL. Full media support should be implemented
-   * as a separate getMediaContent(messageId) method if needed.
+   * For messages with media, the message is cached so that downloadMedia()
+   * can be called later by the message processor.
    */
   private async handleIncomingMessage(message: WWJSMessage): Promise<void> {
     // Ignore group messages - bot only operates in individual chats
@@ -428,16 +569,27 @@ export class WhatsAppChannel extends BaseChannel {
       return;
     }
 
+    // Cache message for later media download if it has media
+    if (message.hasMedia) {
+      this.cacheMessage(message);
+    }
+
     // Convert to unified ChannelMessage format
-    // Note: mediaUrl is not set because WhatsApp requires downloading media
-    // via message.downloadMedia() which returns base64 data, not a URL
-    const channelMsg = this.createMessage({
+    // Build message data with only defined optional fields (exactOptionalPropertyTypes compliance)
+    const messageData: Parameters<typeof this.createMessage>[0] = {
       id: message.id._serialized,
       contactId: message.from,
       content: message.body,
       timestamp: message.timestamp * 1000, // Convert to milliseconds
       mediaType: this.getMediaType(message),
-    });
+    };
+
+    // Use message ID as mediaUrl - processor will use this to call downloadMedia()
+    if (message.hasMedia) {
+      messageData.mediaUrl = message.id._serialized;
+    }
+
+    const channelMsg = this.createMessage(messageData);
 
     // Emit to registered message handlers
     await this.emitMessage(channelMsg);

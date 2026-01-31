@@ -20,6 +20,8 @@ import {
   queueDeferredMessage,
 } from '../hts/index.js';
 import { RelationshipSignal } from './relationship-signals.js';
+import { getVoiceTranscriber } from '../media/index.js';
+import type { ImageContent, MediaType } from '@secondme/shared-types';
 
 /**
  * Message classification type
@@ -37,6 +39,17 @@ export interface WorkflowState {
   contactName: string;
   content: string;
   timestamp: number;
+
+  // Media fields (Phase 4)
+  mediaType?: MediaType;
+  mediaBase64?: string;
+  mediaMimeType?: string;
+
+  // Transcription result (Phase 4 - voice messages)
+  transcribedText?: string;
+
+  // Image for Claude Vision (Phase 4 - image messages)
+  imageContent?: ImageContent;
 
   // Pause control
   isPaused?: boolean;
@@ -143,16 +156,16 @@ async function checkSleepHoursNode(state: WorkflowState): Promise<Partial<Workfl
   try {
     const sleepStatus = await isSleepHours();
 
-    if (sleepStatus.isSleeping) {
+    if (sleepStatus.isSleeping && sleepStatus.wakesUpAt !== undefined) {
       console.log(`[Workflow] Sleep hours active: ${sleepStatus.reason}`);
-      console.log(`[Workflow] Message will be queued until ${new Date(sleepStatus.wakesUpAt!).toISOString()}`);
+      console.log(`[Workflow] Message will be queued until ${new Date(sleepStatus.wakesUpAt).toISOString()}`);
 
       // Queue the message for processing after wake up
       await queueDeferredMessage(
         state.contactId,
         state.messageId,
         state.content,
-        sleepStatus.wakesUpAt!
+        sleepStatus.wakesUpAt
       );
 
       return {
@@ -172,6 +185,113 @@ async function checkSleepHoursNode(state: WorkflowState): Promise<Partial<Workfl
       isSleeping: false,
     };
   }
+}
+
+/**
+ * Process media content (voice transcription, image preparation)
+ * Phase 4: Voice & Media Implementation
+ */
+async function mediaProcessingNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  // Skip if no media or text-only
+  if (!state.mediaBase64 || !state.mediaType || state.mediaType === 'text') {
+    return {};
+  }
+
+  console.log(`[Workflow] Processing ${state.mediaType} media for ${state.contactId}...`);
+
+  // Handle voice messages - transcribe to text
+  if (state.mediaType === 'audio') {
+    const transcriber = getVoiceTranscriber();
+
+    if (!transcriber.isEnabled()) {
+      console.log('[Workflow] Voice transcription disabled, skipping');
+      return {
+        content: `[Voice message - transcription disabled]\n\nOriginal: ${state.content}`,
+      };
+    }
+
+    try {
+      const result = await transcriber.transcribe(
+        state.mediaBase64,
+        state.mediaMimeType || 'audio/ogg'
+      );
+
+      console.log(
+        `[Workflow] Voice transcribed: "${result.text.substring(0, 50)}${result.text.length > 50 ? '...' : ''}" (${result.language || 'unknown'} language)`
+      );
+
+      // Replace content with transcription, keeping original as context
+      return {
+        transcribedText: result.text,
+        content: `[Voice message transcription]: ${result.text}`,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[Workflow] Voice transcription failed: ${errorMsg}`);
+
+      // Continue with original content on failure
+      return {
+        content: `[Voice message - transcription failed: ${errorMsg}]\n\nOriginal: ${state.content}`,
+      };
+    }
+  }
+
+  // Handle image messages - prepare for Claude Vision
+  if (state.mediaType === 'image') {
+    const imageEnabled = process.env['IMAGE_PROCESSING_ENABLED'] !== 'false';
+
+    if (!imageEnabled) {
+      console.log('[Workflow] Image processing disabled, skipping');
+      return {
+        content: state.content || '[Image message - processing disabled]',
+      };
+    }
+
+    // Determine media type for Claude Vision
+    const mimeType = state.mediaMimeType?.split(';')[0] || 'image/jpeg';
+
+    // Validate supported image types
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!supportedTypes.includes(mimeType)) {
+      console.warn(`[Workflow] Unsupported image type: ${mimeType}, converting to jpeg`);
+    }
+
+    const imageMediaType = supportedTypes.includes(mimeType)
+      ? (mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp')
+      : 'image/jpeg';
+
+    console.log(`[Workflow] Image prepared for Claude Vision (${imageMediaType})`);
+
+    return {
+      imageContent: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: imageMediaType,
+          data: state.mediaBase64,
+        },
+      },
+      // Keep caption if exists, otherwise use placeholder
+      content: state.content || '[Image message]',
+    };
+  }
+
+  // Video and document are not yet supported for processing
+  if (state.mediaType === 'video') {
+    console.log('[Workflow] Video processing not yet implemented');
+    return {
+      content: state.content || '[Video message - not yet supported]',
+    };
+  }
+
+  if (state.mediaType === 'document') {
+    console.log('[Workflow] Document processing not yet implemented');
+    return {
+      content: state.content || '[Document message - not yet supported]',
+    };
+  }
+
+  return {};
 }
 
 /**
@@ -271,7 +391,10 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       events: [],
     };
 
-    // Call Sonnet with context, style profile, and conversation history
+    // Prepare images for Claude Vision (Phase 4)
+    const images = state.imageContent ? [state.imageContent] : undefined;
+
+    // Call Sonnet with context, style profile, conversation history, and images
     const result = await sonnetClient.getContextualResponse(
       state.content,
       persona.styleGuide,
@@ -280,7 +403,8 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
         topics: context.topics,
       },
       state.styleProfile, // Pass contact-specific style profile
-      state.conversationHistory // Pass conversation history for multi-turn context
+      state.conversationHistory, // Pass conversation history for multi-turn context
+      images // Pass images for Claude Vision (Phase 4)
     );
 
     const latency = Date.now() - startTime;
@@ -440,20 +564,6 @@ function shouldContinueAfterPause(state: WorkflowState): string {
 }
 
 /**
- * Routing logic - determines next node after sleep hours check
- */
-function shouldContinueAfterSleepCheck(state: WorkflowState): string {
-  if (state.isSleeping) {
-    // Message has been queued for later, stop processing
-    return END;
-  }
-  if (state.error) {
-    return END;
-  }
-  return 'router';
-}
-
-/**
  * Routing logic - determines next node based on classification
  */
 function routeByMessageType(state: WorkflowState): string {
@@ -499,6 +609,12 @@ const WorkflowStateAnnotation = Annotation.Root({
   contactName: Annotation<string>,
   content: Annotation<string>,
   timestamp: Annotation<number>,
+  // Media fields (Phase 4)
+  mediaType: Annotation<MediaType | undefined>,
+  mediaBase64: Annotation<string | undefined>,
+  mediaMimeType: Annotation<string | undefined>,
+  transcribedText: Annotation<string | undefined>,
+  imageContent: Annotation<ImageContent | undefined>,
   // Pause control
   isPaused: Annotation<boolean | undefined>,
   pauseReason: Annotation<string | undefined>,
@@ -539,10 +655,34 @@ const WorkflowStateAnnotation = Annotation.Root({
 });
 
 /**
+ * Routing logic - after sleep check, process media before routing
+ */
+function shouldContinueAfterSleepCheckToMedia(state: WorkflowState): string {
+  if (state.isSleeping) {
+    // Message has been queued for later, stop processing
+    return END;
+  }
+  if (state.error) {
+    return END;
+  }
+  return 'media_processing';
+}
+
+/**
+ * Routing logic - after media processing, continue to router
+ */
+function afterMediaProcessing(state: WorkflowState): string {
+  if (state.error) {
+    return END;
+  }
+  return 'router';
+}
+
+/**
  * Build and compile the workflow graph
- * User Story 2 & 3 workflow with HTS:
+ * User Story 2 & 3 workflow with HTS and Media Processing:
  *
- * check_pause -> check_sleep_hours -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
+ * check_pause -> check_sleep_hours -> media_processing -> router -> [phatic_response | graph_query -> substantive_response] -> queue_response
  */
 export function buildWorkflow() {
   // Use type assertion to work around strict StateGraph typing
@@ -552,6 +692,7 @@ export function buildWorkflow() {
   // Add nodes
   workflow.addNode('check_pause', checkPauseNode);
   workflow.addNode('check_sleep_hours', checkSleepHoursNode);
+  workflow.addNode('media_processing', mediaProcessingNode); // Phase 4: Media processing
   workflow.addNode('router', routerNode);
   workflow.addNode('phatic_response', phaticResponseNode);
   workflow.addNode('graph_query', contextRetrievalNode);
@@ -567,7 +708,12 @@ export function buildWorkflow() {
     [END]: END,
   });
 
-  workflow.addConditionalEdges('check_sleep_hours', shouldContinueAfterSleepCheck, {
+  workflow.addConditionalEdges('check_sleep_hours', shouldContinueAfterSleepCheckToMedia, {
+    media_processing: 'media_processing',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('media_processing', afterMediaProcessing, {
     router: 'router',
     [END]: END,
   });

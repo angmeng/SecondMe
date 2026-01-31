@@ -81,9 +81,13 @@ docker compose down      # Stop services
 ## Data Flow
 
 ```
-WhatsApp Message → Gateway → QUEUE:messages → Orchestrator → Claude
-                                                    ↓
-WhatsApp ← Gateway ← QUEUE:responses ← Orchestrator ←
+WhatsApp/Telegram Message → Gateway → QUEUE:messages → Orchestrator → Claude
+        ↓                      ↓                            ↓
+    [media?]              downloadMedia()           mediaProcessingNode
+        ↓                      ↓                    ├── audio → Whisper
+    voice/image         base64 + mimeType           └── image → Vision
+                                                            ↓
+WhatsApp/Telegram ← Gateway ← QUEUE:responses ← Orchestrator ←
 ```
 
 ## Code Style
@@ -117,6 +121,14 @@ Required in `.env`:
 - `FALKORDB_PASSWORD` - Graph database auth
 - `NODE_ENV` - development/production
 - `USE_SKILL_SYSTEM` - Enable skill-based context retrieval (`true` to enable)
+
+Optional for media processing (Phase 4):
+- `OPENAI_API_KEY` - Required for voice transcription (Whisper API)
+- `VOICE_TRANSCRIPTION_ENABLED` - Feature flag (default: `true` if API key present)
+- `IMAGE_PROCESSING_ENABLED` - Feature flag (default: `true`)
+- `MEDIA_MAX_SIZE_MB` - Whisper file size limit (default: `25`)
+- `TRANSCRIPTION_TIMEOUT_MS` - API timeout (default: `30000`)
+- `MAX_QUEUE_PAYLOAD_MB` - Redis queue payload limit (default: `10`)
 
 ## Environment Setup
 

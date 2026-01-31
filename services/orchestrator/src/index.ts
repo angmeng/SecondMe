@@ -99,13 +99,17 @@ async function startMessageConsumer() {
               `[Orchestrator] Processing message from ${payload.contactId}: ${payload.content}`
             );
 
-            // Build initial workflow state
+            // Build initial workflow state (including media fields from Phase 4)
             const initialState = {
               messageId: payload.messageId,
               contactId: payload.contactId,
               contactName: payload.contactName,
               content: payload.content,
               timestamp: payload.timestamp,
+              // Media fields (Phase 4)
+              mediaType: payload.type, // 'text', 'image', 'audio', 'video', 'document'
+              mediaBase64: payload.mediaBase64,
+              mediaMimeType: payload.mediaMimeType,
             };
 
             // Execute workflow
