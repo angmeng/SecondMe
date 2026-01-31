@@ -1,0 +1,131 @@
+/**
+ * Media Types for SecondMe
+ * Types for voice transcription and image understanding (Phase 4)
+ */
+
+/**
+ * Result from voice transcription (Whisper API)
+ */
+export interface TranscriptionResult {
+  /** Transcribed text */
+  text: string;
+  /** Detected language (ISO 639-1 code) */
+  language?: string;
+  /** Duration of audio in milliseconds */
+  durationMs?: number;
+}
+
+/**
+ * Image content block for Claude Vision API
+ * Matches Anthropic's image content block format
+ */
+export interface ImageContent {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+    data: string; // base64 encoded image data
+  };
+}
+
+/**
+ * Media types for message classification
+ */
+export type MediaType = 'text' | 'image' | 'audio' | 'video' | 'document';
+
+/**
+ * Common MIME types for media content
+ */
+export type MediaMimeType =
+  // Audio
+  | 'audio/ogg'
+  | 'audio/mpeg'
+  | 'audio/mp4'
+  | 'audio/wav'
+  | 'audio/webm'
+  // Image
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/gif'
+  | 'image/webp'
+  // Video
+  | 'video/mp4'
+  | 'video/webm'
+  // Document
+  | 'application/pdf'
+  // Fallback for unknown types
+  | string;
+
+/**
+ * Downloaded media payload for queue
+ */
+export interface DownloadedMedia {
+  /** Base64-encoded media content */
+  base64: string;
+  /** MIME type of the media */
+  mimeType: string;
+  /** Original file size in bytes */
+  sizeBytes?: number;
+}
+
+/**
+ * Configuration for voice transcription
+ */
+export interface TranscriptionConfig {
+  /** Whether voice transcription is enabled */
+  enabled: boolean;
+  /** Maximum audio file size in bytes (Whisper limit is 25MB) */
+  maxFileSizeBytes: number;
+  /** Timeout for transcription API call in milliseconds */
+  timeoutMs: number;
+}
+
+/**
+ * Configuration for image processing
+ */
+export interface ImageProcessingConfig {
+  /** Whether image processing is enabled */
+  enabled: boolean;
+  /** Maximum image size in bytes before resizing */
+  maxSizeBytes: number;
+  /** Target quality for JPEG compression (0-100) */
+  jpegQuality: number;
+}
+
+/**
+ * Default transcription configuration
+ */
+export const DEFAULT_TRANSCRIPTION_CONFIG: TranscriptionConfig = {
+  enabled: true,
+  maxFileSizeBytes: 25 * 1024 * 1024, // 25MB Whisper limit
+  timeoutMs: 30000, // 30 seconds
+};
+
+/**
+ * Default image processing configuration
+ */
+export const DEFAULT_IMAGE_CONFIG: ImageProcessingConfig = {
+  enabled: true,
+  maxSizeBytes: 5 * 1024 * 1024, // 5MB for Claude Vision
+  jpegQuality: 85,
+};
+
+/**
+ * Combined media limits for validation
+ * Uses the larger of transcription/image limits for general validation
+ */
+export const DEFAULT_MEDIA_LIMITS = {
+  /** Maximum file size in bytes (25MB - Whisper limit) */
+  maxFileSizeBytes: 25 * 1024 * 1024,
+  /** Supported audio MIME types for transcription */
+  supportedAudioTypes: [
+    'audio/ogg',
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/wav',
+    'audio/webm',
+    'audio/flac',
+  ] as const,
+  /** Supported image MIME types for vision */
+  supportedImageTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const,
+};

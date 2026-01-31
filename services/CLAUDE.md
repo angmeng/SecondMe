@@ -21,6 +21,7 @@ services/
 │       ├── anthropic/ # Haiku, Sonnet clients, prompts
 │       ├── falkordb/  # Cypher queries
 │       ├── history/   # Conversation history RAG (keyword chunking)
+│       ├── media/     # Voice transcription (Whisper), image processing
 │       ├── config/    # Feature configurations
 │       ├── hts/       # Human typing simulation
 │       └── redis/     # Consumer, persona cache
@@ -91,6 +92,37 @@ The gateway uses a channel abstraction to support multiple messaging platforms.
 - Supports text, photo, voice, document, and video messages
 - Token validation on construction (must contain `:`)
 - Contact caching from incoming messages
+- Media download with retry logic (3 retries, exponential backoff)
+
+**Media Download (Phase 4)**:
+
+Both channel adapters implement `downloadMedia()` for voice/image processing:
+
+```typescript
+// WhatsApp: Uses message caching (messages cached for 5 minutes)
+const media = await whatsappChannel.downloadMedia(messageId);
+// Returns: { base64: string, mimeType: string, sizeBytes: number } | null
+
+// Telegram: Uses Bot API getFile() with retry logic
+const media = await telegramChannel.downloadMedia(fileId);
+// Retries on 5xx errors, 429 rate limits, and network failures
+```
+
+**WhatsApp Message Cache**:
+- Messages cached on receive for later media download
+- TTL: 5 minutes
+- Periodic cleanup every 60 seconds
+- Cache cleared on disconnect
+
+**Size Validation** (in message-processor.ts):
+```typescript
+// Two-tier validation:
+// 1. Queue payload limit (default 10MB, configurable via MAX_QUEUE_PAYLOAD_MB)
+// 2. Processing limit (25MB for Whisper, from DEFAULT_MEDIA_LIMITS)
+if (mediaSize > MAX_QUEUE_PAYLOAD_SIZE_BYTES) {
+  // Skip media, continue processing message text
+}
+```
 
 **Channel Manager API**:
 ```
@@ -297,6 +329,86 @@ PUT    /skills/:skillId/config  # Update config
 1. Create skill class extending `BaseSkill` in `skills/built-in/`
 2. Implement `execute()` to return `SkillExecutionResult`
 3. Register in `skills/index.ts` via `registerBuiltInSkills()`
+
+### Media Processing (Phase 4)
+
+The orchestrator processes voice messages and images via the media pipeline.
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `media/transcriber.ts` | VoiceTranscriber class using OpenAI Whisper API |
+| `media/index.ts` | Media module exports |
+| `langgraph/workflow.ts` | `mediaProcessingNode` for audio/image routing |
+| `anthropic/sonnet-client.ts` | Claude Vision image block support |
+
+**Data Flow:**
+```
+Queue Message (mediaBase64, mediaMimeType)
+    ↓
+Orchestrator Entry Point
+    ↓
+Media Processing Node
+    ├── Audio → Whisper API → transcribedText → content
+    └── Image → ImageContent → Claude Vision
+    ↓
+Substantive Response Node
+```
+
+**Voice Transcription:**
+```typescript
+// VoiceTranscriber singleton with lazy initialization
+const transcriber = getVoiceTranscriber();
+
+// Transcribe audio (base64 + mimeType)
+const result = await transcriber.transcribe(base64Audio, 'audio/ogg');
+// Returns: { text: string, language?: string, durationMs?: number }
+```
+
+**Image Processing:**
+```typescript
+// Images are converted to Claude Vision content blocks
+const imageContent: ImageContent = {
+  type: 'image',
+  source: {
+    type: 'base64',
+    media_type: 'image/jpeg',
+    data: base64ImageData,
+  },
+};
+
+// Passed to Sonnet client
+await sonnetClient.getContextualResponse(systemPrompt, userMessage, {
+  images: [imageContent],
+});
+```
+
+**WorkflowState Media Fields:**
+```typescript
+interface WorkflowState {
+  // ... existing fields
+  mediaType?: 'text' | 'image' | 'audio' | 'video' | 'document';
+  mediaBase64?: string;
+  mediaMimeType?: string;
+  transcribedText?: string;
+  imageContent?: ImageContent;
+}
+```
+
+**Environment Variables:**
+```bash
+OPENAI_API_KEY=sk-...              # Required for Whisper
+VOICE_TRANSCRIPTION_ENABLED=true   # Feature flag (default: true)
+MEDIA_MAX_SIZE_MB=25               # Whisper limit
+TRANSCRIPTION_TIMEOUT_MS=30000     # API timeout
+```
+
+**Shared Types** (from `@secondme/shared-types`):
+- `TranscriptionResult` - Whisper API response
+- `ImageContent` - Claude Vision content block
+- `DownloadedMedia` - Base64 + mimeType + sizeBytes
+- `TranscriptionConfig` - Transcriber settings
+- `DEFAULT_MEDIA_LIMITS` - Size limits for validation
 
 ## Graph Worker Service
 

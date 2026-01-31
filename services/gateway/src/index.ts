@@ -31,6 +31,7 @@ import {
   ChannelRouter,
   type ChannelLogger,
 } from './channels/index.js';
+import type { DownloadedMedia } from '@secondme/shared-types';
 import { ContactLinker } from './contact-linking/index.js';
 import express from 'express';
 
@@ -419,6 +420,23 @@ async function startGatewayService() {
         await messageSender.sendMessage(to, content, { simulateTyping: true });
       },
       contactLinker,
+      // Phase 4: Media download callback for voice/image processing
+      downloadMedia: async (channelId, mediaUrl) => {
+        const channel = channelManager.get(channelId);
+        if (!channel) {
+          logger.warn(`Cannot download media: channel ${channelId} not found`);
+          return null;
+        }
+
+        // Cast to type with downloadMedia method (WhatsAppChannel or TelegramChannel)
+        const channelWithMedia = channel as { downloadMedia?: (id: string) => Promise<DownloadedMedia | null> };
+        if (!channelWithMedia.downloadMedia) {
+          logger.warn(`Channel ${channelId} does not support media download`);
+          return null;
+        }
+
+        return channelWithMedia.downloadMedia(mediaUrl);
+      },
     });
 
     // Initialize channel manager

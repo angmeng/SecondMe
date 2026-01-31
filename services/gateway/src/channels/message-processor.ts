@@ -12,10 +12,19 @@
  * Extracted from WhatsApp message-handler.ts to support multi-channel architecture.
  */
 
-import type { ChannelMessage, ChannelId, ContactTier } from '@secondme/shared-types';
+import type { ChannelMessage, ChannelId, ContactTier, DownloadedMedia } from '@secondme/shared-types';
+import { DEFAULT_MEDIA_LIMITS } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { ChannelLogger } from './types.js';
+
+/**
+ * Maximum payload size for Redis queue (in bytes of base64 data)
+ * Set conservatively to avoid Redis memory issues
+ * Default: 10MB base64 (~7.5MB binary)
+ */
+const MAX_QUEUE_PAYLOAD_SIZE_BYTES =
+  parseInt(process.env['MAX_QUEUE_PAYLOAD_MB'] || '10', 10) * 1024 * 1024;
 
 /**
  * Interface for contact linker operations (optional dependency)
@@ -95,6 +104,10 @@ export interface RedisClientInterface {
     timestamp: number;
     hasMedia: boolean;
     type: string;
+    /** Base64-encoded media content (for voice/image processing) */
+    mediaBase64?: string;
+    /** MIME type of the media (e.g., 'audio/ogg', 'image/jpeg') */
+    mediaMimeType?: string;
   }): Promise<void>;
   publish(channel: string, message: string): Promise<void>;
   client: {
@@ -122,6 +135,8 @@ export interface MessageProcessorDeps {
   sendMessage?: (to: string, content: string) => Promise<void>;
   /** Optional: contact linker for cross-channel linking */
   contactLinker?: ContactLinkerInterface;
+  /** Optional: download media from a channel using mediaUrl (Phase 4) */
+  downloadMedia?: (channelId: ChannelId, mediaUrl: string) => Promise<DownloadedMedia | null>;
 }
 
 /**
@@ -249,16 +264,84 @@ export class GatewayMessageProcessor {
       return { processed: true, reason: 'rate_limited' };
     }
 
-    // STEP 5: Queue for orchestrator
-    const messagePayload = {
+    // STEP 5: Download media if present (Phase 4)
+    let mediaBase64: string | undefined;
+    let mediaMimeType: string | undefined;
+
+    const hasMedia = message.mediaType !== undefined && message.mediaType !== 'text';
+    if (hasMedia && message.mediaUrl && this.deps.downloadMedia) {
+      try {
+        const downloaded = await this.deps.downloadMedia(channelId, message.mediaUrl);
+        if (downloaded) {
+          // Size validation: check if media is too large for queue
+          const estimatedPayloadSize = downloaded.base64.length;
+          if (estimatedPayloadSize > MAX_QUEUE_PAYLOAD_SIZE_BYTES) {
+            this.deps.logger.warn(
+              `Media too large to queue for ${this.maskContactId(contactId)}, skipping media`,
+              {
+                contactId: this.maskContactId(contactId),
+                channelId,
+                mediaType: message.mediaType,
+                sizeMB: Math.round(estimatedPayloadSize / 1024 / 1024),
+                limitMB: Math.round(MAX_QUEUE_PAYLOAD_SIZE_BYTES / 1024 / 1024),
+              }
+            );
+            // Don't include media in payload, but continue processing message
+          } else if (
+            downloaded.sizeBytes &&
+            downloaded.sizeBytes > DEFAULT_MEDIA_LIMITS.maxFileSizeBytes
+          ) {
+            // Also check against Whisper/Claude limits
+            this.deps.logger.warn(
+              `Media exceeds processing limits for ${this.maskContactId(contactId)}, skipping media`,
+              {
+                contactId: this.maskContactId(contactId),
+                channelId,
+                mediaType: message.mediaType,
+                sizeMB: Math.round(downloaded.sizeBytes / 1024 / 1024),
+                limitMB: Math.round(DEFAULT_MEDIA_LIMITS.maxFileSizeBytes / 1024 / 1024),
+              }
+            );
+          } else {
+            mediaBase64 = downloaded.base64;
+            mediaMimeType = downloaded.mimeType;
+            this.deps.logger.info(`Downloaded media for ${this.maskContactId(contactId)}`, {
+              contactId: this.maskContactId(contactId),
+              channelId,
+              mediaType: message.mediaType,
+              sizeKB: downloaded.sizeBytes ? Math.round(downloaded.sizeBytes / 1024) : 'unknown',
+            });
+          }
+        }
+      } catch (error) {
+        // Log but don't fail - message can still be processed without media
+        this.deps.logger.warn(`Failed to download media for ${this.maskContactId(contactId)}`, {
+          contactId: this.maskContactId(contactId),
+          channelId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // STEP 6: Queue for orchestrator
+    // Build payload with only defined optional fields (exactOptionalPropertyTypes compliance)
+    const messagePayload: Parameters<RedisClientInterface['queueMessage']>[0] = {
       messageId,
       contactId,
       contactName: contactName || 'Unknown',
       content,
       timestamp,
-      hasMedia: message.mediaType !== undefined && message.mediaType !== 'text',
+      hasMedia,
       type: message.mediaType || 'text',
     };
+
+    // Only add media fields if they exist
+    if (mediaBase64) {
+      messagePayload.mediaBase64 = mediaBase64;
+    }
+    if (mediaMimeType) {
+      messagePayload.mediaMimeType = mediaMimeType;
+    }
 
     await this.deps.redisClient.queueMessage(messagePayload);
 
@@ -415,16 +498,51 @@ export class GatewayMessageProcessor {
           return { processed: true, reason: 'rate_limited', autoApproved: true };
         }
 
-        // Queue for orchestrator
-        await this.deps.redisClient.queueMessage({
+        // Download media if present (Phase 4)
+        let autoMediaBase64: string | undefined;
+        let autoMediaMimeType: string | undefined;
+
+        const hasAutoMedia = message.mediaType !== undefined && message.mediaType !== 'text';
+        if (hasAutoMedia && message.mediaUrl && this.deps.downloadMedia) {
+          try {
+            const downloaded = await this.deps.downloadMedia(channelId, message.mediaUrl);
+            if (downloaded) {
+              // Size validation for auto-approved contacts too
+              const estimatedPayloadSize = downloaded.base64.length;
+              const exceedsQueueLimit = estimatedPayloadSize > MAX_QUEUE_PAYLOAD_SIZE_BYTES;
+              const exceedsProcessingLimit =
+                downloaded.sizeBytes &&
+                downloaded.sizeBytes > DEFAULT_MEDIA_LIMITS.maxFileSizeBytes;
+
+              if (!exceedsQueueLimit && !exceedsProcessingLimit) {
+                autoMediaBase64 = downloaded.base64;
+                autoMediaMimeType = downloaded.mimeType;
+              }
+            }
+          } catch {
+            // Log silently - message can still be processed without media
+          }
+        }
+
+        // Queue for orchestrator (build payload with only defined optional fields)
+        const autoPayload: Parameters<RedisClientInterface['queueMessage']>[0] = {
           messageId,
           contactId,
           contactName: contactName || 'Unknown',
           content,
           timestamp,
-          hasMedia: message.mediaType !== undefined && message.mediaType !== 'text',
+          hasMedia: hasAutoMedia,
           type: message.mediaType || 'text',
-        });
+        };
+
+        if (autoMediaBase64) {
+          autoPayload.mediaBase64 = autoMediaBase64;
+        }
+        if (autoMediaMimeType) {
+          autoPayload.mediaMimeType = autoMediaMimeType;
+        }
+
+        await this.deps.redisClient.queueMessage(autoPayload);
 
         // Emit message received event
         this.deps.emitEvent('message_received', {

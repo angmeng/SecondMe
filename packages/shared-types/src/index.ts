@@ -91,3 +91,20 @@ export type {
 } from './channels.js';
 
 export { DEFAULT_CHANNEL_CONFIG, isStoredLinkedContact } from './channels.js';
+
+// Media types (Phase 4 - Voice & Image)
+export type {
+  TranscriptionResult,
+  ImageContent,
+  MediaType,
+  MediaMimeType,
+  DownloadedMedia,
+  TranscriptionConfig,
+  ImageProcessingConfig,
+} from './media.js';
+
+export {
+  DEFAULT_TRANSCRIPTION_CONFIG,
+  DEFAULT_IMAGE_CONFIG,
+  DEFAULT_MEDIA_LIMITS,
+} from './media.js';

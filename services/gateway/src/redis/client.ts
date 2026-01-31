@@ -154,6 +154,7 @@ class RedisClient {
 
   /**
    * Queue message to Redis stream for Orchestrator to process
+   * Includes media fields for voice transcription and image understanding (Phase 4)
    */
   async queueMessage(messageData: {
     messageId: string;
@@ -163,6 +164,10 @@ class RedisClient {
     timestamp: number;
     hasMedia: boolean;
     type: string;
+    /** Base64-encoded media content (for voice/image processing) */
+    mediaBase64?: string;
+    /** MIME type of the media (e.g., 'audio/ogg', 'image/jpeg') */
+    mediaMimeType?: string;
   }): Promise<void> {
     const payload = JSON.stringify(messageData);
 
@@ -174,7 +179,11 @@ class RedisClient {
       payload
     );
 
-    console.log(`[Gateway Redis] Message queued: ${messageData.messageId}`);
+    // Log with media info if present
+    const mediaInfo = messageData.mediaBase64
+      ? ` (media: ${messageData.type}, ${Math.round((messageData.mediaBase64.length * 3) / 4 / 1024)}KB)`
+      : '';
+    console.log(`[Gateway Redis] Message queued: ${messageData.messageId}${mediaInfo}`);
   }
 
   /**
