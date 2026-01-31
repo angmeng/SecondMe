@@ -53,3 +53,14 @@ export {
 
 // Base class
 export { BaseChannel } from './base-channel.js';
+
+// WhatsApp channel
+export {
+  WhatsAppChannel,
+  type WhatsAppChannelDeps,
+  type WhatsAppChannelConfig,
+  normalizeWhatsAppContactId,
+  isGroupChat,
+  isStatusBroadcast,
+  extractPhoneNumber,
+} from './whatsapp/index.js';
