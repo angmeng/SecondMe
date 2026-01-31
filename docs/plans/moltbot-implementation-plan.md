@@ -18,7 +18,7 @@ This plan translates moltbot learnings into actionable tasks for SecondMe, organ
 | P0 | Pairing Mode | Medium | High | None | ✅ Complete |
 | P1 | Security Audit System | Low | Medium | None | ✅ Complete |
 | P1 | Plugin Architecture | High | High | None | ✅ Complete |
-| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | 🔲 Not Started |
+| P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | 🔄 In Progress |
 | P2 | Voice Message Support | Medium | Medium | None | 🔲 Not Started |
 | P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem | 🔲 Not Started |
 | P3 | Onboarding Wizard | Medium | Medium | None | 🔲 Not Started |
@@ -1021,50 +1021,103 @@ For now, only built-in skills are supported
 
 **Goal**: Enable support for multiple messaging platforms beyond WhatsApp.
 
+**Current State**: Gateway service has tightly-coupled WhatsApp implementation with MessageHandler, MessageSender, and session management.
+
+**Target State**: Abstracted channel layer supporting WhatsApp, Telegram, and future platforms.
+
+#### Environment Variables (New)
+
+```bash
+# Channel configuration
+WHATSAPP_ENABLED=true           # Enable WhatsApp channel (default: true)
+TELEGRAM_ENABLED=false          # Enable Telegram channel
+TELEGRAM_BOT_TOKEN=             # From BotFather
+
+# Cross-channel settings
+CONTACT_LINKING_ENABLED=true    # Link contacts across channels by phone
+```
+
+---
+
 #### Task 3.1.1: Channel Interface Definition
 
-**Scope**: Define abstract channel interface
+**Scope**: Define abstract channel interface and message formats
 
 **Files to create**:
 - `packages/shared-types/src/channels.ts`
+- `services/gateway/src/channels/types.ts`
 - `services/gateway/src/channels/base-channel.ts`
 
 **Deliverables**:
 ```typescript
 // packages/shared-types/src/channels.ts
+
+/**
+ * Supported channel identifiers
+ */
+export type ChannelId = 'whatsapp' | 'telegram' | 'discord' | 'slack';
+
+/**
+ * Unified message format across all channels
+ */
 export interface ChannelMessage {
   id: string;
-  channelId: string;           // e.g., 'whatsapp', 'telegram'
-  contactId: string;           // Channel-specific contact ID
+  version: 2;                    // Schema version for backwards compat
+  channelId: ChannelId;
+  contactId: string;             // Channel-specific ID (e.g., 1234@c.us)
+  normalizedContactId?: string;  // Phone number for cross-channel linking
   content: string;
   timestamp: number;
   mediaType?: 'text' | 'image' | 'audio' | 'video' | 'document';
   mediaUrl?: string;
-  replyTo?: string;            // Message ID being replied to
+  replyTo?: string;
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Channel connection status
+ */
+export type ChannelStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
+
+/**
+ * Channel information for dashboard
+ */
+export interface ChannelInfo {
+  id: ChannelId;
+  displayName: string;
+  icon: string;
+  status: ChannelStatus;
+  contactCount: number;
+  lastActivity?: number;
+  error?: string;
+}
+
+/**
+ * Abstract channel interface
+ */
 export interface Channel {
-  readonly name: string;
+  readonly id: ChannelId;
   readonly displayName: string;
   readonly icon: string;
-  readonly status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  readonly status: ChannelStatus;
 
   // Lifecycle
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  isConnected(): boolean;
 
   // Messaging
-  sendMessage(to: string, content: MessageContent): Promise<string>;
-  sendTypingIndicator(to: string): Promise<void>;
+  sendMessage(to: string, content: MessageContent): Promise<SendResult>;
+  sendTypingIndicator(to: string, durationMs?: number): Promise<void>;
 
   // Events
   onMessage(handler: (msg: ChannelMessage) => void): void;
-  onStatusChange(handler: (status: ChannelStatus) => void): void;
+  onStatusChange(handler: (status: ChannelStatus, error?: string) => void): void;
 
-  // Info
-  getContacts(): Promise<Contact[]>;
-  getContact(id: string): Promise<Contact | null>;
+  // Contact info
+  getContacts(): Promise<ChannelContact[]>;
+  getContact(id: string): Promise<ChannelContact | null>;
+  normalizeContactId(contactId: string): string | null;  // Extract phone number
 }
 
 export interface MessageContent {
@@ -1073,83 +1126,242 @@ export interface MessageContent {
     type: 'image' | 'audio' | 'video' | 'document';
     url: string;
     caption?: string;
+    filename?: string;
   };
+}
+
+export interface SendResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}
+
+export interface ChannelContact {
+  id: string;
+  channelId: ChannelId;
+  normalizedId?: string;         // Phone number
+  displayName?: string;
+  profilePicUrl?: string;
+}
+
+// Runtime type guard
+export function isChannelMessage(obj: unknown): obj is ChannelMessage {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const msg = obj as Record<string, unknown>;
+  return (
+    typeof msg['id'] === 'string' &&
+    typeof msg['channelId'] === 'string' &&
+    typeof msg['contactId'] === 'string' &&
+    typeof msg['content'] === 'string' &&
+    typeof msg['timestamp'] === 'number'
+  );
 }
 ```
 
 **Acceptance Criteria**:
 - [ ] Interface covers common messaging operations
-- [ ] Extensible for channel-specific features
-- [ ] Type-safe message content
+- [ ] Schema version field for backwards compatibility
+- [ ] `normalizeContactId()` method for cross-channel linking
+- [ ] Runtime type guard for message validation
+- [ ] Unit tests for type guards
 
 ---
 
-#### Task 3.1.2: WhatsApp Channel Adapter
+#### Task 3.1.2a: Extract Channel-Agnostic Logic ✅ COMPLETE
 
-**Scope**: Refactor existing WhatsApp code into channel adapter
+**Status**: Completed 2026-01-31
 
-**Files to create/modify**:
-- `services/gateway/src/channels/whatsapp/index.ts`
-- `services/gateway/src/channels/whatsapp/adapter.ts`
-- Refactor: `services/gateway/src/whatsapp/*` → channel adapter
+**Scope**: Extract reusable rate limiting logic from current WhatsApp implementation
 
-**Changes**:
-1. Wrap existing whatsapp-web.js code in Channel interface
-2. Normalize message format to ChannelMessage
-3. Update message handler to use Channel abstraction
-4. Update sender to use Channel.sendMessage()
+**Files created**:
+- `services/gateway/src/channels/rate-limiter.ts` - RateLimiter class
+- `services/gateway/src/channels/__tests__/rate-limiter.test.ts` - 22 unit tests
+
+**Files modified**:
+- `services/gateway/src/channels/types.ts` - Added RateLimiter types
+- `services/gateway/src/channels/index.ts` - Added exports
+
+**Implementation Notes**:
+- Extracted rate limiting from `message-handler.ts:362-420`
+- Pairing store (`pairing-store.ts`) was already isolated - reuse as-is
+- Content analyzer (`content-analyzer.ts`) was already isolated - integrate later
+- Typing simulation stays in orchestrator (it calculates `{typingDelay, thinkTime}` and passes to gateway)
+
+**Deliverables**:
+```typescript
+// services/gateway/src/channels/rate-limiter.ts
+export class RateLimiter {
+  constructor(deps: RateLimiterDeps, config?: RateLimiterConfig);
+  async check(contactId: string): Promise<RateLimitResult>;
+  async reset(contactId: string, clearPause?: boolean): Promise<void>;
+  async getCount(contactId: string): Promise<number>;
+  getConfig(): Required<RateLimiterConfig>;
+}
+
+// Types added to types.ts
+export interface RateLimiterConfig {
+  threshold?: number;       // Default: 10
+  windowSeconds?: number;   // Default: 60
+  autoPause?: boolean;      // Default: true
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  currentCount: number;
+  threshold: number;
+  windowSeconds: number;
+  autoPaused: boolean;
+}
+```
 
 **Acceptance Criteria**:
-- [ ] WhatsApp functionality unchanged
-- [ ] Messages normalized to ChannelMessage format
-- [ ] Status changes emit to channel events
-- [ ] All existing tests pass
+- [x] RateLimiter extracted as standalone class
+- [x] Configurable threshold and window size
+- [x] Auto-pause feature with socket.io + Redis pub/sub events
+- [x] Fails open on Redis errors (doesn't block messages)
+- [x] 22 unit tests passing
+- [x] No type errors in new files
+
+**Why no MessageProcessor or TypingSimulator**:
+1. Pairing store and content analyzer were already isolated modules
+2. WhatsAppChannel adapter (Task 3.1.2b) will orchestrate the pipeline
+3. Typing simulation stays in orchestrator - gateway just executes delays
 
 ---
 
-#### Task 3.1.3: Channel Router
+#### Task 3.1.2b: WhatsApp Channel Adapter
+
+**Scope**: Wrap existing WhatsApp code in Channel interface
+
+**Files to create**:
+- `services/gateway/src/channels/whatsapp/index.ts`
+- `services/gateway/src/channels/whatsapp/adapter.ts`
+- `services/gateway/src/channels/whatsapp/normalizer.ts`
+
+**Files to modify**:
+- `services/gateway/src/whatsapp/client.ts` (keep, used by adapter)
+- `services/gateway/src/whatsapp/auth.ts` (keep, used by adapter)
+
+**Deliverables**:
+```typescript
+// services/gateway/src/channels/whatsapp/adapter.ts
+export class WhatsAppChannel implements Channel {
+  readonly id: ChannelId = 'whatsapp';
+  readonly displayName = 'WhatsApp';
+  readonly icon = 'whatsapp';
+
+  constructor(private client: WhatsAppClient);
+
+  // Implement all Channel interface methods
+  // Delegate to existing WhatsAppClient
+
+  normalizeContactId(contactId: string): string | null {
+    // Extract phone from '1234567890@c.us' → '+1234567890'
+    const match = contactId.match(/^(\d+)@c\.us$/);
+    return match ? `+${match[1]}` : null;
+  }
+}
+```
+
+**Acceptance Criteria**:
+- [ ] WhatsAppChannel implements Channel interface
+- [ ] Existing whatsapp-web.js code reused (not rewritten)
+- [ ] Messages converted to ChannelMessage format
+- [ ] Status changes emit through Channel events
+- [ ] `normalizeContactId` extracts phone number
+- [ ] All existing WhatsApp tests pass
+
+---
+
+#### Task 3.1.2c: Migrate Message Flow
+
+**Scope**: Update gateway to use Channel abstraction
+
+**Files to modify**:
+- `services/gateway/src/index.ts`
+- `services/gateway/src/whatsapp/message-handler.ts` → use MessageProcessor
+- `services/gateway/src/whatsapp/sender.ts` → use TypingSimulator
+
+**Changes**:
+1. Gateway initializes WhatsAppChannel instead of raw client
+2. MessageHandler uses MessageProcessor for common logic
+3. Sender uses TypingSimulator for delay calculation
+4. All socket events include channelId
+
+**Acceptance Criteria**:
+- [ ] Gateway uses Channel abstraction
+- [ ] Existing functionality preserved
+- [ ] Socket events include channelId
+- [ ] Integration tests pass
+
+---
+
+#### Task 3.1.3: Channel Router & Manager
 
 **Scope**: Route messages from multiple channels to orchestrator
 
 **Files to create**:
-- `services/gateway/src/channels/router.ts`
 - `services/gateway/src/channels/manager.ts`
+- `services/gateway/src/channels/router.ts`
+- `services/gateway/src/channels/index.ts`
 
-**Router Logic**:
+**Deliverables**:
 ```typescript
+// services/gateway/src/channels/manager.ts
 export class ChannelManager {
-  private channels: Map<string, Channel> = new Map();
+  private channels: Map<ChannelId, Channel> = new Map();
+  private messageProcessor: MessageProcessor;
 
+  constructor(deps: ChannelManagerDeps);
+
+  // Lifecycle
   register(channel: Channel): void;
-  unregister(name: string): void;
+  unregister(id: ChannelId): void;
+  async connectAll(): Promise<void>;
+  async disconnectAll(): Promise<void>;
 
-  getChannel(name: string): Channel | undefined;
+  // Access
+  getChannel(id: ChannelId): Channel | undefined;
   listChannels(): ChannelInfo[];
 
-  // Unified message handling
+  // Unified message handling (routes through MessageProcessor)
   onMessage(handler: (msg: ChannelMessage) => void): void;
 
   // Route response back to correct channel
-  sendResponse(channelId: string, contactId: string, content: MessageContent): Promise<void>;
+  async sendResponse(
+    channelId: ChannelId,
+    contactId: string,
+    content: MessageContent,
+    options?: SendOptions,
+  ): Promise<SendResult>;
 }
 ```
 
-**Redis Queue Enhancement**:
+**Redis Queue Enhancement** (versioned format):
 ```typescript
-// QUEUE:messages entry now includes channel info
+// QUEUE:messages entry with channel info
 interface QueuedMessage {
-  channelId: string;        // 'whatsapp', 'telegram'
-  contactId: string;        // Channel-specific ID
-  normalizedContactId: string; // Cross-channel ID (phone number)
-  // ... existing fields
+  version: 2;                    // Schema version
+  messageId: string;
+  channelId: ChannelId;
+  contactId: string;             // Channel-specific ID
+  normalizedContactId?: string;  // Phone number for linking
+  contactName?: string;
+  content: string;
+  timestamp: number;
+  metadata?: Record<string, unknown>;
 }
+
+// Backwards compatibility: version 1 messages assume channelId='whatsapp'
 ```
 
 **Acceptance Criteria**:
 - [ ] Multiple channels can be registered
-- [ ] Messages from all channels queued correctly
+- [ ] Messages from all channels processed through MessageProcessor
+- [ ] Queued messages include version and channelId
 - [ ] Responses routed to correct channel
-- [ ] Cross-channel contact linking possible
+- [ ] Graceful handling of channel disconnections
+- [ ] Unit tests for ChannelManager
 
 ---
 
@@ -1160,26 +1372,47 @@ interface QueuedMessage {
 **Files to create**:
 ```
 services/gateway/src/channels/telegram/
-├── index.ts
-├── adapter.ts
-├── client.ts
-└── types.ts
+├── index.ts          # Exports
+├── adapter.ts        # TelegramChannel implements Channel
+├── client.ts         # grammY bot wrapper
+└── normalizer.ts     # Contact ID normalization
 ```
 
-**Dependencies**: `grammy` (Telegram bot framework)
+**Dependencies**: `grammy` (MIT license, well-maintained)
 
 **Implementation**:
-1. Create Telegram bot via BotFather
-2. Implement Channel interface using grammY
-3. Handle message types (text, photo, voice, document)
-4. Implement typing indicator
+```typescript
+// services/gateway/src/channels/telegram/adapter.ts
+export class TelegramChannel implements Channel {
+  readonly id: ChannelId = 'telegram';
+  readonly displayName = 'Telegram';
+  readonly icon = 'telegram';
+
+  constructor(botToken: string);
+
+  normalizeContactId(contactId: string): string | null {
+    // Telegram users may share phone; extract if available
+    // Format: 'user_123456789' or phone if shared
+    return null; // Phone only available if user shares it
+  }
+}
+```
+
+**Telegram-Specific Handling**:
+- Bot must be started with `/start` command
+- Users can share phone number (for linking)
+- Inline keyboards for pairing approval
+- Voice messages have different format than WhatsApp
 
 **Acceptance Criteria**:
-- [ ] Telegram bot connects and receives messages
-- [ ] Messages queued to QUEUE:messages with channelId='telegram'
+- [ ] Telegram bot connects via grammY
+- [ ] Messages queued with channelId='telegram'
 - [ ] Responses sent back to Telegram
-- [ ] Media messages handled (at least images)
+- [ ] `/start` command handled (welcome + pairing if needed)
+- [ ] Text messages supported
+- [ ] Photo messages supported (at minimum)
 - [ ] Dashboard shows Telegram connection status
+- [ ] Graceful handling of rate limits
 
 ---
 
@@ -1187,23 +1420,173 @@ services/gateway/src/channels/telegram/
 
 **Scope**: Update dashboard for multi-channel support
 
-**Files to modify**:
-- `frontend/src/app/page.tsx` (show multiple channel statuses)
-- `frontend/src/components/ChannelStatus.tsx` (new)
-- `frontend/src/app/api/channels/route.ts` (new)
-- `frontend/src/app/contacts/page.tsx` (add channel filter)
+**Files to create**:
+- `frontend/src/components/ChannelStatusCard.tsx`
+- `frontend/src/app/api/channels/route.ts`
+- `frontend/src/app/api/channels/[channelId]/route.ts`
 
-**UI Changes**:
-- Channel status cards (WhatsApp, Telegram, etc.)
-- Per-channel connect/disconnect controls
-- Contact list shows channel badges
-- Filter contacts by channel
+**Files to modify**:
+- `frontend/src/app/page.tsx` (show channel status cards)
+- `frontend/src/app/pairing/page.tsx` (show channel badges)
+- `frontend/src/components/Navigation.tsx` (channels link)
+
+**API Routes**:
+```
+GET    /api/channels              # List all channels with status
+GET    /api/channels/:id          # Get channel details
+POST   /api/channels/:id/connect  # Connect channel
+POST   /api/channels/:id/disconnect # Disconnect channel
+POST   /api/channels/:id/pause    # Pause channel
+```
+
+**UI Components**:
+
+1. **ChannelStatusCard.tsx**
+   - Channel icon + name
+   - Connection status indicator
+   - Contact count
+   - Connect/Disconnect button
+   - Pause toggle
+   - Last activity timestamp
+
+2. **Updated Pairing Page**
+   - Channel badge on each request
+   - Filter by channel
+   - Bulk actions per channel
 
 **Acceptance Criteria**:
-- [ ] All connected channels shown in dashboard
+- [ ] All channels shown in dashboard
+- [ ] Per-channel connect/disconnect controls
 - [ ] Per-channel pause controls
-- [ ] Contact list filterable by channel
-- [ ] Channel-specific metrics
+- [ ] Pairing requests show channel badge
+- [ ] Real-time status updates via Socket.io
+
+---
+
+#### Task 3.1.6: Cross-Channel Contact Linking
+
+**Scope**: Link contacts across channels by phone number
+
+**Files to create**:
+- `services/gateway/src/channels/contact-linker.ts`
+- `packages/shared-types/src/linked-contact.ts`
+
+**Redis Keys**:
+```
+CONTACTS:linked:{normalizedPhone}  # Set of {channelId}:{contactId}
+CONTACTS:phone:{channelId}:{contactId}  # Normalized phone number
+```
+
+**Deliverables**:
+```typescript
+// services/gateway/src/channels/contact-linker.ts
+export class ContactLinker {
+  constructor(private redis: Redis);
+
+  /**
+   * Link a contact to their phone number
+   */
+  async linkContact(
+    channelId: ChannelId,
+    contactId: string,
+    normalizedPhone: string,
+  ): Promise<void>;
+
+  /**
+   * Find all channel contacts for a phone number
+   */
+  async findLinkedContacts(
+    normalizedPhone: string,
+  ): Promise<LinkedContact[]>;
+
+  /**
+   * Get phone number for a contact (if known)
+   */
+  async getPhoneForContact(
+    channelId: ChannelId,
+    contactId: string,
+  ): Promise<string | null>;
+}
+
+export interface LinkedContact {
+  channelId: ChannelId;
+  contactId: string;
+  normalizedPhone: string;
+}
+```
+
+**Use Cases**:
+1. Same person messages on WhatsApp and Telegram
+2. Conversation history shared across channels
+3. Pairing approval applies to all linked contacts
+
+**Acceptance Criteria**:
+- [ ] Contacts can be linked by phone number
+- [ ] Linked contacts share pairing approval
+- [ ] Linked contacts share conversation history (future)
+- [ ] Dashboard shows linked contacts together (future)
+
+---
+
+### Phase 3: Implementation Notes
+
+#### Risk Assessment
+
+| Task | Complexity | Risk | Mitigation |
+|------|------------|------|------------|
+| 3.1.1 Interface | Low | Low | Well-defined types |
+| 3.1.2a Extract | Medium | Low | No behavior change |
+| 3.1.2b Adapter | Medium | **Medium** | Careful testing |
+| 3.1.2c Migrate | Medium | **Medium** | Feature flag option |
+| 3.1.3 Router | Medium | Low | Straightforward |
+| 3.1.4 Telegram | Medium | Low | Independent channel |
+| 3.1.5 Dashboard | Medium | Low | UI only |
+| 3.1.6 Linking | Low | Low | Optional feature |
+
+#### Backwards Compatibility
+
+1. **Queue Message Version**: Messages without `version` field treated as v1 (WhatsApp-only)
+2. **Pairing Store**: Existing `PAIRING:approved:{contactId}` keys remain valid for WhatsApp
+3. **Feature Flag**: `MULTI_CHANNEL_ENABLED=true` to enable new code paths
+
+#### Dependencies Between Tasks
+
+```
+Task 3.1.1 (Interface) ─────────────────────────────────┐
+                                                        │
+Task 3.1.2a (Extract) ──── depends on ── Task 3.1.1 ───┤
+                                                        │
+Task 3.1.2b (Adapter) ──── depends on ── Task 3.1.2a ──┤
+                                                        │
+Task 3.1.2c (Migrate) ──── depends on ── Task 3.1.2b ──┤
+                                                        │
+Task 3.1.3 (Router) ────── depends on ── Task 3.1.2c ──┤
+                                                        │
+Task 3.1.4 (Telegram) ──── depends on ── Task 3.1.1 ───┤ (parallel with 3.1.2-3.1.3)
+                          │                             │
+                          └─ integrates with ─ 3.1.3 ──┤
+                                                        │
+Task 3.1.5 (Dashboard) ─── depends on ── Task 3.1.3 ───┤
+                                                        │
+Task 3.1.6 (Linking) ───── depends on ── Task 3.1.3 ───┘
+```
+
+#### Suggested Sprint Plan
+
+**Sprint 5: Channel Foundation (Week 1)**
+- Task 3.1.1: Channel Interface Definition (2-3 hours)
+- Task 3.1.2a: Extract Channel-Agnostic Logic (4-6 hours)
+- Task 3.1.2b: WhatsApp Channel Adapter (4-6 hours)
+
+**Sprint 6: Migration & Router (Week 2)**
+- Task 3.1.2c: Migrate Message Flow (3-4 hours)
+- Task 3.1.3: Channel Router & Manager (4-6 hours)
+- Integration testing (2-3 hours)
+
+**Sprint 7: Telegram & Dashboard (Week 3)**
+- Task 3.1.4: Telegram Channel (6-8 hours)
+- Task 3.1.5: Multi-Channel Dashboard (4-6 hours)
+- Task 3.1.6: Cross-Channel Linking (2-3 hours)
 
 ---
 
@@ -1561,14 +1944,20 @@ SecondMe Doctor
 1. Task 2.1.3: Skill Configuration UI
 2. Task 2.1.4: External Skill Loading
 
-### Sprint 5: Multi-Channel Foundation
-1. Task 3.1.1: Channel Interface
-2. Task 3.1.2: WhatsApp Adapter
-3. Task 3.1.3: Channel Router
+### Sprint 5: Channel Foundation (Week 1)
+1. Task 3.1.1: Channel Interface Definition (2-3 hours)
+2. Task 3.1.2a: Extract Channel-Agnostic Logic (4-6 hours)
+3. Task 3.1.2b: WhatsApp Channel Adapter (4-6 hours)
 
-### Sprint 6: Telegram Channel
-1. Task 3.1.4: Telegram Implementation
-2. Task 3.1.5: Multi-Channel Dashboard
+### Sprint 6: Migration & Router (Week 2)
+1. Task 3.1.2c: Migrate Message Flow (3-4 hours)
+2. Task 3.1.3: Channel Router & Manager (4-6 hours)
+3. Integration testing (2-3 hours)
+
+### Sprint 7: Telegram & Dashboard (Week 3)
+1. Task 3.1.4: Telegram Channel (6-8 hours)
+2. Task 3.1.5: Multi-Channel Dashboard (4-6 hours)
+3. Task 3.1.6: Cross-Channel Linking (2-3 hours)
 
 ### Sprint 7: Voice & Media
 1. Task 4.1.1: Voice Transcription
@@ -1594,6 +1983,8 @@ SecondMe Doctor
 | Security Logging | Security events captured | All events logged |
 | Plugin System | Core tools as skills | 4+ skills |
 | Multi-Channel | Channels supported | 2+ (WhatsApp, Telegram) |
+| Multi-Channel | Cross-channel linking | Phone-based linking works |
+| Multi-Channel | WhatsApp regression | 0 (all existing tests pass) |
 | Voice | Transcription accuracy | 95%+ |
 | RAG Quality | Relevant context retrieved | Subjective improvement |
 | DX | Time to first message | < 10 minutes |
@@ -1607,6 +1998,8 @@ SecondMe Doctor
 | Pairing UX friction | Users may find pairing annoying | Clear messaging, quick approval process |
 | Plugin security | Malicious skills could harm system | Sandboxed execution, permission model |
 | Multi-channel complexity | Increased maintenance burden | Strong abstraction, shared tests |
+| WhatsApp adapter regression | Breaking existing functionality | Feature flag, comprehensive tests, incremental migration |
+| Telegram rate limits | Bot may get throttled | Respect rate limits, queue outgoing messages |
 | Whisper API costs | Voice transcription can be expensive | Usage limits, optional feature |
 | Breaking changes | Existing users affected | Migration scripts, backwards compatibility |
 
