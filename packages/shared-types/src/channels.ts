@@ -3,6 +3,8 @@
  * Types for multi-channel messaging support (WhatsApp, Telegram, etc.)
  */
 
+import type { ContactTier } from './pairing.js';
+
 /**
  * Supported channel identifiers
  * Extensible for future channels (discord, slack, etc.)
@@ -150,6 +152,41 @@ export interface LinkedContact {
 }
 
 /**
+ * Extended LinkedContact with timestamps for storage
+ */
+export interface StoredLinkedContact extends LinkedContact {
+  /** When linking was first established */
+  linkedAt: number;
+  /** Last activity timestamp across all channels */
+  lastActivity?: number;
+}
+
+/**
+ * Result of resolving a contact's linked identity
+ */
+export interface ResolvedContact {
+  contactId: string;
+  channelId: ChannelId;
+  normalizedPhone: string | null;
+  linkedChannels: LinkedContact['channels'];
+  isApproved: boolean;
+  tier?: ContactTier;
+}
+
+/**
+ * Type guard for StoredLinkedContact
+ */
+export function isStoredLinkedContact(obj: unknown): obj is StoredLinkedContact {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const lc = obj as Record<string, unknown>;
+  return (
+    typeof lc['normalizedPhone'] === 'string' &&
+    Array.isArray(lc['channels']) &&
+    typeof lc['linkedAt'] === 'number'
+  );
+}
+
+/**
  * Channel interface that all channel adapters must implement
  * This is the contract for channel implementations
  */
@@ -206,6 +243,15 @@ export interface SendOptions {
   typingDelay?: number;
   /** Whether to quote/reply to a specific message */
   replyToMessageId?: string;
+}
+
+/**
+ * Extended channel info with enabled state for manager
+ * Used by dashboard to display channel status with toggle controls
+ */
+export interface ManagedChannelInfo extends ChannelInfo {
+  /** Whether this channel is enabled in the manager */
+  enabled: boolean;
 }
 
 /**

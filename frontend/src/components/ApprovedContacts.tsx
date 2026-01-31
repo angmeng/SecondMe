@@ -10,7 +10,8 @@ import { useToast } from '@/contexts/ToastContext';
 import { getErrorMessage } from '@/lib/errors';
 import Avatar from '@/components/ui/Avatar';
 import { SkeletonCard } from '@/components/ui/Skeleton';
-import type { ApprovedContact, ContactTier } from '@secondme/shared-types';
+import ChannelBadge from '@/components/ui/ChannelBadge';
+import type { ContactTier, EnrichedApprovedContact } from '@secondme/shared-types';
 
 type FilterTier = 'all' | ContactTier;
 
@@ -19,7 +20,7 @@ interface ApprovedContactsProps {
 }
 
 export default function ApprovedContacts({ refreshTrigger }: ApprovedContactsProps) {
-  const [contacts, setContacts] = useState<ApprovedContact[]>([]);
+  const [contacts, setContacts] = useState<EnrichedApprovedContact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -257,13 +258,33 @@ export default function ApprovedContacts({ refreshTrigger }: ApprovedContactsPro
               <div className="flex items-center gap-3">
                 <Avatar name={contact.displayName || contact.phoneNumber} size="md" />
                 <div>
-                  <h3 className="font-medium text-slate-900 dark:text-slate-100">
-                    {contact.displayName || contact.phoneNumber}
-                  </h3>
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-slate-900 dark:text-slate-100">
+                      {contact.displayName || contact.phoneNumber}
+                    </h3>
+                    {contact.channelId && (
+                      <ChannelBadge channelId={contact.channelId} size="xs" />
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                     <span>+{contact.phoneNumber}</span>
                     <span className="text-slate-300 dark:text-slate-600">|</span>
                     <span>Approved {formatDate(contact.approvedAt)}</span>
+                    {contact.linkedChannels && contact.linkedChannels.length > 0 && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-600">|</span>
+                        <span className="flex items-center gap-1">
+                          Also on:
+                          {contact.linkedChannels.map((c) => (
+                            <ChannelBadge
+                              key={c.contactId}
+                              channelId={c.channelId}
+                              size="xs"
+                            />
+                          ))}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

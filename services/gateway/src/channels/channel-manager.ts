@@ -13,19 +13,13 @@
 import type {
   Channel,
   ChannelId,
-  ChannelInfo,
   ChannelManagerConfig,
+  ManagedChannelInfo,
 } from '@secondme/shared-types';
 import type { ChannelLogger } from './types.js';
 
-/**
- * Extended channel info with enabled state for manager
- * Note: ChannelInfo from shared-types has: id, displayName, icon, status, contactCount, lastActivity, error
- */
-export interface ManagedChannelInfo extends ChannelInfo {
-  /** Whether this channel is enabled in the manager */
-  enabled: boolean;
-}
+// Re-export for convenience
+export type { ManagedChannelInfo } from '@secondme/shared-types';
 
 /**
  * Dependencies for the ChannelManager

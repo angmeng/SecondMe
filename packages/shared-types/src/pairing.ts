@@ -128,3 +128,16 @@ export const DEFAULT_PAIRING_CONFIG: PairingConfig = {
 export type CreatePairingResult =
   | { success: true; request: PairingRequest }
   | { success: false; reason: 'already_approved' | 'already_pending' | 'denied_cooldown' };
+
+/**
+ * Approved contact enriched with linked channels info
+ * Used by dashboard API responses
+ */
+export interface EnrichedApprovedContact extends ApprovedContact {
+  /** Other channels this contact is linked to (excludes current contact) */
+  linkedChannels?: Array<{
+    channelId: string;
+    contactId: string;
+    displayName?: string;
+  }>;
+}

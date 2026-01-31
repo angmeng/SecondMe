@@ -31,6 +31,7 @@ import {
   ChannelRouter,
   type ChannelLogger,
 } from './channels/index.js';
+import { ContactLinker } from './contact-linking/index.js';
 import express from 'express';
 
 const PORT = process.env.GATEWAY_PORT || 3001;
@@ -72,6 +73,7 @@ let messageProcessor: GatewayMessageProcessor;
 let rateLimiter: RateLimiter;
 let channelManager: ChannelManager;
 let channelRouter: ChannelRouter;
+let contactLinker: ContactLinker;
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -138,6 +140,48 @@ app.get('/api/channels', async (req, res) => {
     res.status(500).json({
       error: error.message || 'Failed to get channel status',
     });
+  }
+});
+
+// Valid channel IDs for validation
+const VALID_CHANNEL_IDS = ['whatsapp', 'telegram'] as const;
+type ValidChannelId = (typeof VALID_CHANNEL_IDS)[number];
+
+function isValidChannelId(id: string): id is ValidChannelId {
+  return VALID_CHANNEL_IDS.includes(id as ValidChannelId);
+}
+
+// Enable a channel
+app.post('/api/channels/:channelId/enable', async (req, res) => {
+  const { channelId } = req.params;
+  try {
+    if (!channelManager) {
+      return res.status(503).json({ error: 'Channel manager not initialized' });
+    }
+    if (!isValidChannelId(channelId)) {
+      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+    }
+    await channelManager.enable(channelId);
+    res.json({ success: true, channelId, status: 'enabled' });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Failed to enable channel' });
+  }
+});
+
+// Disable a channel
+app.post('/api/channels/:channelId/disable', async (req, res) => {
+  const { channelId } = req.params;
+  try {
+    if (!channelManager) {
+      return res.status(503).json({ error: 'Channel manager not initialized' });
+    }
+    if (!isValidChannelId(channelId)) {
+      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+    }
+    await channelManager.disable(channelId);
+    res.json({ success: true, channelId, status: 'disabled' });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Failed to disable channel' });
   }
 });
 
@@ -356,6 +400,13 @@ async function startGatewayService() {
       }
     );
 
+    // Initialize contact linker for cross-channel linking
+    contactLinker = new ContactLinker({
+      redis: redisClient.client,
+      pairingStore,
+    });
+    console.log('[Gateway] Contact linker initialized');
+
     // Initialize message processor
     messageProcessor = new GatewayMessageProcessor({
       rateLimiter,
@@ -367,6 +418,7 @@ async function startGatewayService() {
       sendMessage: async (to: string, content: string) => {
         await messageSender.sendMessage(to, content, { simulateTyping: true });
       },
+      contactLinker,
     });
 
     // Initialize channel manager
@@ -374,7 +426,7 @@ async function startGatewayService() {
       { logger, emitEvent },
       {
         enabled: true,
-        contactLinkingEnabled: false, // Phase 3.1.6
+        contactLinkingEnabled: true, // Cross-channel contact linking enabled
         defaultChannel: 'whatsapp',
       }
     );

@@ -267,12 +267,15 @@ module.exports = {
 | `/api/settings` | GET/PUT | Bot settings |
 | `/api/metrics` | GET | Performance metrics |
 | `/api/session` | GET | Session info |
+| `/api/channels` | GET | List all channels |
+| `/api/channels/[channelId]` | POST | Enable/disable channel (action: enable\|disable) |
 
 ## Component Categories
 
 ### UI Components (`components/ui/`)
 Base-level, reusable components:
 - `Avatar` - User/contact avatars
+- `ChannelBadge` - Channel identifier badge (WhatsApp/Telegram)
 - `EmptyState` - Empty list placeholders
 - `Skeleton` - Loading skeletons
 - `StatusIndicator` - Connection/status dots
@@ -281,11 +284,15 @@ Base-level, reusable components:
 ### Feature Components (`components/`)
 Domain-specific components:
 - `BotStatus` - WhatsApp connection status
+- `ChannelStatusCard` - Single channel status display with toggle
+- `ChannelStatusGrid` - Grid of channel cards with real-time updates
 - `KillSwitch` - Global pause toggle
 - `QRCodeDisplay` - QR code canvas renderer
 - `ContactList` - Contact management list
 - `ConversationThread` - Chat history display
 - `PersonaEditor` - Persona configuration
+- `PairingRequests` - Pending contact approval requests
+- `ApprovedContacts` - Approved contacts management
 - `SleepHoursConfig` - Sleep hours settings
 - `MetricsDisplay` - Performance dashboard
 - `ActivityLog` - Recent activity feed
