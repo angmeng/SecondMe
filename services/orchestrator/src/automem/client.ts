@@ -31,6 +31,7 @@ class AutoMemClient {
 
   /**
    * Initialize connection and verify health
+   * Connection is optional - service continues without AutoMem if unavailable
    */
   async connect(): Promise<void> {
     try {
@@ -43,8 +44,10 @@ class AutoMemClient {
         this.isConnected = health.status !== 'unhealthy';
       }
     } catch (error) {
-      console.error('[AutoMem Client] Failed to connect:', error);
-      throw error;
+      // Log warning but don't throw - AutoMem is optional
+      console.warn('[AutoMem Client] AutoMem not available, continuing without memory features');
+      console.warn(`[AutoMem Client] Connection failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.isConnected = false;
     }
   }
 
@@ -61,6 +64,13 @@ class AutoMemClient {
    */
   get connected(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Returns empty response when not connected
+   */
+  private notConnectedResponse(): RecallResponse {
+    return { status: 'error', results: [], count: 0 };
   }
 
   /**
@@ -94,8 +104,26 @@ class AutoMemClient {
 
   /**
    * Store a new memory
+   * Returns error response if not connected
    */
   async store(request: StoreMemoryRequest): Promise<StoreMemoryResponse> {
+    if (!this.isConnected) {
+      const now = new Date().toISOString();
+      return {
+        status: 'error',
+        memory_id: '',
+        stored_at: now,
+        type: request.type ?? 'Context',
+        confidence: 0,
+        qdrant: 'not_connected',
+        embedding_status: 'skipped',
+        enrichment: 'skipped',
+        timestamp: now,
+        updated_at: now,
+        last_accessed: now,
+      };
+    }
+
     const response = await fetch(`${this.baseUrl}/memory`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -112,8 +140,13 @@ class AutoMemClient {
 
   /**
    * Recall memories based on query parameters
+   * Returns empty response if not connected
    */
   async recall(query: RecallQuery): Promise<RecallResponse> {
+    if (!this.isConnected) {
+      return this.notConnectedResponse();
+    }
+
     const params = new URLSearchParams();
 
     if (query.query) {

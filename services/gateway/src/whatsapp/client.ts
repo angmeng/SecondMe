@@ -11,6 +11,8 @@ import path from 'path';
 class WhatsAppClient {
   private client: Client;
   private ready: boolean = false;
+  private initializing: boolean = false;
+  private initialized: boolean = false;
 
   constructor() {
     // Initialize WhatsApp client with LocalAuth strategy
@@ -93,13 +95,27 @@ class WhatsAppClient {
   }
 
   async initialize(): Promise<void> {
+    // Already initialized or in progress - skip
+    if (this.initialized || this.initializing) {
+      console.log('[Gateway WhatsApp] Client already initialized, skipping');
+      return;
+    }
+
+    this.initializing = true;
     console.log('[Gateway WhatsApp] Initializing WhatsApp client...');
-    await this.client.initialize();
+
+    try {
+      await this.client.initialize();
+      this.initialized = true;
+    } finally {
+      this.initializing = false;
+    }
   }
 
   async destroy(): Promise<void> {
     console.log('[Gateway WhatsApp] Destroying WhatsApp client...');
     this.ready = false;
+    this.initialized = false;
     await this.client.destroy();
   }
 
