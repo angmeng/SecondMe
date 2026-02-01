@@ -44,6 +44,16 @@ const DEFAULT_RETRY_CONFIG = {
   backoffMultiplier: 2,
 };
 
+/**
+ * Retry configuration for API message sending (handles 429 rate limits)
+ */
+const MESSAGE_RETRY_CONFIG = {
+  maxRetries: 5,
+  initialDelayMs: 1000,
+  maxDelayMs: 30000,
+  backoffMultiplier: 2,
+};
+
 export class TelegramChannel extends BaseChannel {
   readonly id = 'telegram' as const;
   readonly displayName = 'Telegram';
@@ -313,26 +323,66 @@ export class TelegramChannel extends BaseChannel {
   }
 
   /**
-   * Send a message to a Telegram user
+   * Send a message to a Telegram user with retry logic for rate limits
    */
   async sendMessage(to: string, content: MessageContent): Promise<SendResult> {
+    if (!content.text) {
+      return { success: false, error: 'No text content' };
+    }
+
     try {
       const chatId = this.extractChatId(to);
+      return this.sendMessageWithRetry(chatId, content.text, to, 0);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Invalid contact ID';
+      return { success: false, error: errorMsg };
+    }
+  }
 
-      if (content.text) {
-        const result = await this.bot.api.sendMessage(chatId, content.text);
-        return { success: true, messageId: result.message_id.toString() };
+  /**
+   * Internal method with retry logic for message sending
+   */
+  private async sendMessageWithRetry(
+    chatId: number,
+    text: string,
+    to: string,
+    attempt: number
+  ): Promise<SendResult> {
+    try {
+      const result = await this.bot.api.sendMessage(chatId, text);
+      return { success: true, messageId: result.message_id.toString() };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Send failed';
+
+      // Check if this is a rate limit error (429)
+      if (this.is429Error(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
+        return this.retryMessageSend(
+          () => this.sendMessageWithRetry(chatId, text, to, attempt + 1),
+          error,
+          attempt,
+          'sendMessage',
+          to
+        );
       }
 
-      return { success: false, error: 'No text content' };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Send failed';
+      // Check if this is another retryable error
+      if (this.isRetryableError(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
+        return this.retryMessageSend(
+          () => this.sendMessageWithRetry(chatId, text, to, attempt + 1),
+          error,
+          attempt,
+          'sendMessage',
+          to
+        );
+      }
+
       this.logger.error('Failed to send Telegram message', {
         channelId: this.id,
         to,
-        error: message,
+        error: errorMsg,
+        attempt: attempt + 1,
       });
-      return { success: false, error: message };
+      return { success: false, error: errorMsg };
     }
   }
 
@@ -354,7 +404,7 @@ export class TelegramChannel extends BaseChannel {
   }
 
   /**
-   * Send a voice message to a Telegram user
+   * Send a voice message to a Telegram user with retry logic for rate limits
    * Phase 5: TTS voice response
    *
    * @param to - Contact ID to send to (tg_{userId} format)
@@ -371,10 +421,28 @@ export class TelegramChannel extends BaseChannel {
       // Convert base64 to Buffer
       const buffer = Buffer.from(audio.base64, 'base64');
 
-      // Create InputFile from buffer
-      // Note: Telegram prefers OGG/Opus for voice notes but accepts MP3
       // Match filename extension to actual MIME type
       const ext = audio.mimeType === 'audio/mpeg' ? 'mp3' : 'ogg';
+
+      return this.sendVoiceWithRetry(chatId, buffer, ext, to, 0);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Invalid contact ID';
+      return { success: false, error: errorMsg };
+    }
+  }
+
+  /**
+   * Internal method with retry logic for voice message sending
+   */
+  private async sendVoiceWithRetry(
+    chatId: number,
+    buffer: Buffer,
+    ext: string,
+    to: string,
+    attempt: number
+  ): Promise<SendResult> {
+    try {
+      // Create InputFile from buffer (recreate each attempt to avoid stream issues)
       const inputFile = new InputFile(buffer, `voice.${ext}`);
 
       // Send as voice note
@@ -384,15 +452,40 @@ export class TelegramChannel extends BaseChannel {
         channelId: this.id,
         to,
         messageId: result.message_id.toString(),
+        attempts: attempt + 1,
       });
 
       return { success: true, messageId: result.message_id.toString() };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Voice send failed';
+
+      // Check if this is a rate limit error (429)
+      if (this.is429Error(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
+        return this.retryMessageSend(
+          () => this.sendVoiceWithRetry(chatId, buffer, ext, to, attempt + 1),
+          error,
+          attempt,
+          'sendVoice',
+          to
+        );
+      }
+
+      // Check if this is another retryable error
+      if (this.isRetryableError(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
+        return this.retryMessageSend(
+          () => this.sendVoiceWithRetry(chatId, buffer, ext, to, attempt + 1),
+          error,
+          attempt,
+          'sendVoice',
+          to
+        );
+      }
+
       this.logger.error('Failed to send Telegram voice message', {
         channelId: this.id,
         to,
         error: errorMsg,
+        attempt: attempt + 1,
       });
       return { success: false, error: errorMsg };
     }
@@ -550,6 +643,69 @@ export class TelegramChannel extends BaseChannel {
   private isRetryableStatusCode(status: number): boolean {
     // Retry on server errors (5xx) and rate limiting (429)
     return status >= 500 || status === 429;
+  }
+
+  /**
+   * Check if error is a Telegram 429 (Too Many Requests) rate limit error
+   */
+  private is429Error(error: unknown): boolean {
+    if (error instanceof Error) {
+      return error.message.includes('429') || error.message.toLowerCase().includes('too many requests');
+    }
+    return false;
+  }
+
+  /**
+   * Extract retry_after value from Telegram 429 error
+   * Telegram error format: "429 Too Many Requests: retry_after=30"
+   */
+  private extractRetryAfter(error: unknown): number | undefined {
+    if (error instanceof Error) {
+      const match = error.message.match(/retry_after[=:]?\s*(\d+)/i);
+      if (match?.[1]) {
+        return parseInt(match[1], 10) * 1000; // Convert seconds to milliseconds
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Retry message send operation with exponential backoff
+   * Respects retry_after for 429 errors
+   */
+  private async retryMessageSend<T>(
+    operation: () => Promise<T>,
+    error: unknown,
+    currentAttempt: number,
+    operationType: string,
+    to: string
+  ): Promise<T> {
+    const nextAttempt = currentAttempt + 1;
+
+    // For 429 errors, prefer the retry_after value from Telegram
+    let delay = this.extractRetryAfter(error);
+
+    // If no retry_after, use exponential backoff
+    if (delay === undefined) {
+      delay = Math.min(
+        MESSAGE_RETRY_CONFIG.initialDelayMs *
+          Math.pow(MESSAGE_RETRY_CONFIG.backoffMultiplier, currentAttempt),
+        MESSAGE_RETRY_CONFIG.maxDelayMs
+      );
+    }
+
+    this.logger.warn(`Retrying Telegram ${operationType}`, {
+      channelId: this.id,
+      to,
+      attempt: nextAttempt,
+      maxRetries: MESSAGE_RETRY_CONFIG.maxRetries,
+      delayMs: delay,
+      reason: error instanceof Error ? error.message : String(error),
+      is429: this.is429Error(error),
+    });
+
+    await this.sleep(delay);
+    return operation();
   }
 
   /**

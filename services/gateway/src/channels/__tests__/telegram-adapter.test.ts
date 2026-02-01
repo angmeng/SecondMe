@@ -203,6 +203,61 @@ describe('TelegramChannel', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Rate limited');
     });
+
+    it('retries on 429 rate limit error and eventually succeeds', async () => {
+      await channel.connect();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // First call fails with 429, second succeeds
+      mockBotInstance.api.sendMessage
+        .mockRejectedValueOnce(new Error('429 Too Many Requests: retry_after=1'))
+        .mockResolvedValueOnce({ message_id: 789 });
+
+      const result = await channel.sendMessage('tg_123456', { text: 'Test' });
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('789');
+      expect(mockBotInstance.api.sendMessage).toHaveBeenCalledTimes(2);
+      expect(mockDeps.logger.warn).toHaveBeenCalledWith(
+        'Retrying Telegram sendMessage',
+        expect.objectContaining({
+          is429: true,
+          delayMs: 1000,
+        })
+      );
+    });
+
+    it('retries on network errors', async () => {
+      await channel.connect();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // First call fails with network error, second succeeds
+      mockBotInstance.api.sendMessage
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockResolvedValueOnce({ message_id: 999 });
+
+      const result = await channel.sendMessage('tg_123456', { text: 'Test' });
+
+      expect(result.success).toBe(true);
+      expect(result.messageId).toBe('999');
+      expect(mockBotInstance.api.sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails after exhausting all retries on persistent 429 errors', async () => {
+      await channel.connect();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // All calls fail with 429
+      const error = new Error('429 Too Many Requests: retry_after=1');
+      mockBotInstance.api.sendMessage.mockRejectedValue(error);
+
+      const result = await channel.sendMessage('tg_123456', { text: 'Test' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('429');
+      // 1 initial + 5 retries = 6 total attempts
+      expect(mockBotInstance.api.sendMessage).toHaveBeenCalledTimes(6);
+    });
   });
 
   describe('sendTypingIndicator', () => {

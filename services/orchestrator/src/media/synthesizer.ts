@@ -9,6 +9,18 @@ import type { SynthesisResult, SynthesisConfig } from '@secondme/shared-types';
 import { DEFAULT_SYNTHESIS_CONFIG } from '@secondme/shared-types';
 
 /**
+ * Per-request synthesis options (for per-contact preferences)
+ */
+export interface SynthesisOptions {
+  /** Override voice ID for this request */
+  voiceId?: string;
+  /** Override model ID for this request */
+  modelId?: string;
+  /** Override max characters for this request */
+  maxCharacters?: number;
+}
+
+/**
  * Configuration for the voice synthesizer
  */
 export interface VoiceSynthesizerConfig {
@@ -60,9 +72,10 @@ export class VoiceSynthesizer {
    * Synthesize text to speech
    *
    * @param text - Text to synthesize
+   * @param options - Optional per-request overrides (for per-contact preferences)
    * @returns Synthesis result with base64 audio data
    */
-  async synthesize(text: string): Promise<SynthesisResult> {
+  async synthesize(text: string, options?: SynthesisOptions): Promise<SynthesisResult> {
     if (!this.enabled) {
       throw new Error('Voice synthesis is disabled');
     }
@@ -72,21 +85,24 @@ export class VoiceSynthesizer {
       throw new Error('Cannot synthesize empty text');
     }
 
+    // Use per-request options or fall back to defaults
+    const voiceId = options?.voiceId || this.voiceId;
+    const modelId = options?.modelId || this.modelId;
+    const maxCharacters = options?.maxCharacters || this.config.maxCharacters;
+
     // Truncate text if too long (cost control)
     const truncatedText =
-      text.length > this.config.maxCharacters
-        ? text.slice(0, this.config.maxCharacters) + '...'
-        : text;
+      text.length > maxCharacters ? text.slice(0, maxCharacters) + '...' : text;
 
     const startTime = Date.now();
 
     try {
       // Call ElevenLabs API with timeout
       const audioStream = await this.client.textToSpeech.convert(
-        this.voiceId,
+        voiceId,
         {
           text: truncatedText,
-          modelId: this.modelId,
+          modelId: modelId,
           outputFormat: 'mp3_44100_128', // High quality MP3
         },
         {

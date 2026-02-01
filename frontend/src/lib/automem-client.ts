@@ -106,6 +106,10 @@ export interface ContactMetadata {
   assignedPersona?: string;
   assignedPersonaName?: string;
   lastInteraction?: number;
+  // Task 4.1.2: Per-contact voice preferences
+  voiceOutputEnabled?: boolean;
+  preferredVoiceId?: string;
+  voiceMaxCharacters?: number;
 }
 
 /**

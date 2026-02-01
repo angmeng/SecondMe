@@ -19,6 +19,10 @@ interface PatchContactBody {
   assignedPersona?: string | null;
   relationshipType?: string;
   botEnabled?: boolean;
+  // Task 4.1.2: Per-contact voice preferences
+  voiceOutputEnabled?: boolean;
+  preferredVoiceId?: string | null;
+  voiceMaxCharacters?: number | null;
 }
 
 /**
@@ -94,6 +98,10 @@ export async function GET(
       assignedPersona: assignedPersonaId || undefined,
       assignedPersonaName: assignedPersonaName || undefined,
       lastInteraction: metadata?.lastInteraction || undefined,
+      // Task 4.1.2: Voice preferences
+      voiceOutputEnabled: metadata?.voiceOutputEnabled ?? true,
+      preferredVoiceId: metadata?.preferredVoiceId || undefined,
+      voiceMaxCharacters: metadata?.voiceMaxCharacters || undefined,
     };
 
     return NextResponse.json({ contact });
@@ -123,6 +131,9 @@ export async function PATCH(
       assignedPersona?: string;
       relationshipType?: string;
       botEnabled?: boolean;
+      voiceOutputEnabled?: boolean;
+      preferredVoiceId?: string;
+      voiceMaxCharacters?: number;
     }> = {};
 
     // Handle assignedPersona (null = clear assignment)
@@ -142,6 +153,27 @@ export async function PATCH(
     // Handle botEnabled
     if ('botEnabled' in body && typeof body.botEnabled === 'boolean') {
       updates.botEnabled = body.botEnabled;
+    }
+
+    // Task 4.1.2: Handle voice preferences
+    if ('voiceOutputEnabled' in body && typeof body.voiceOutputEnabled === 'boolean') {
+      updates.voiceOutputEnabled = body.voiceOutputEnabled;
+    }
+
+    if ('preferredVoiceId' in body) {
+      if (body.preferredVoiceId === null) {
+        updates.preferredVoiceId = undefined; // Clear preference (use default)
+      } else if (body.preferredVoiceId) {
+        updates.preferredVoiceId = body.preferredVoiceId;
+      }
+    }
+
+    if ('voiceMaxCharacters' in body) {
+      if (body.voiceMaxCharacters === null) {
+        updates.voiceMaxCharacters = undefined; // Clear preference (use default)
+      } else if (typeof body.voiceMaxCharacters === 'number' && body.voiceMaxCharacters > 0) {
+        updates.voiceMaxCharacters = body.voiceMaxCharacters;
+      }
     }
 
     // If no fields to update, return early
