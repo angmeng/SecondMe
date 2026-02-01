@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:watch": "vitest watch",
     "migrate:pairing": "tsx src/scripts/migrate-existing-contacts.ts"

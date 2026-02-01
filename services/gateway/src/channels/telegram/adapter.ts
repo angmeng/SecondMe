@@ -6,7 +6,7 @@
  * and the Bot API for sending messages.
  */
 
-import { Bot, type Context } from 'grammy';
+import { Bot, InputFile, type Context } from 'grammy';
 import { BaseChannel } from '../base-channel.js';
 import type { MessageContent, SendResult, ChannelContact, DownloadedMedia } from '@secondme/shared-types';
 import type { ChannelDependencies, ChannelInitOptions } from '../types.js';
@@ -350,6 +350,51 @@ export class TelegramChannel extends BaseChannel {
         to,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Send a voice message to a Telegram user
+   * Phase 5: TTS voice response
+   *
+   * @param to - Contact ID to send to (tg_{userId} format)
+   * @param audio - Audio data with base64 content and mimeType
+   * @returns SendResult indicating success/failure
+   */
+  async sendVoice(
+    to: string,
+    audio: { base64: string; mimeType: string }
+  ): Promise<SendResult> {
+    try {
+      const chatId = this.extractChatId(to);
+
+      // Convert base64 to Buffer
+      const buffer = Buffer.from(audio.base64, 'base64');
+
+      // Create InputFile from buffer
+      // Note: Telegram prefers OGG/Opus for voice notes but accepts MP3
+      // Match filename extension to actual MIME type
+      const ext = audio.mimeType === 'audio/mpeg' ? 'mp3' : 'ogg';
+      const inputFile = new InputFile(buffer, `voice.${ext}`);
+
+      // Send as voice note
+      const result = await this.bot.api.sendVoice(chatId, inputFile);
+
+      this.logger.info('Voice message sent', {
+        channelId: this.id,
+        to,
+        messageId: result.message_id.toString(),
+      });
+
+      return { success: true, messageId: result.message_id.toString() };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Voice send failed';
+      this.logger.error('Failed to send Telegram voice message', {
+        channelId: this.id,
+        to,
+        error: errorMsg,
+      });
+      return { success: false, error: errorMsg };
     }
   }
 

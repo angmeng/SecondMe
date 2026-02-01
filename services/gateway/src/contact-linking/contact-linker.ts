@@ -109,30 +109,29 @@ export class ContactLinker {
 
       if (existingIndex >= 0) {
         // Update display name if provided
-        if (displayName) {
-          linked.channels[existingIndex].displayName = displayName;
+        const existingChannel = linked.channels[existingIndex];
+        if (displayName && existingChannel) {
+          existingChannel.displayName = displayName;
         }
       } else {
-        // Add new channel entry
-        linked.channels.push({
-          channelId,
-          contactId,
-          displayName,
-        });
+        // Add new channel entry (only include displayName if defined)
+        linked.channels.push(
+          displayName
+            ? { channelId, contactId, displayName }
+            : { channelId, contactId }
+        );
       }
 
       // Update last activity
       linked.lastActivity = now;
     } else {
-      // Create new linked contact
+      // Create new linked contact (only include displayName if defined)
       linked = {
         normalizedPhone,
         channels: [
-          {
-            channelId,
-            contactId,
-            displayName,
-          },
+          displayName
+            ? { channelId, contactId, displayName }
+            : { channelId, contactId },
         ],
         linkedAt: now,
         lastActivity: now,
@@ -214,11 +213,15 @@ export class ContactLinker {
       const isApproved = await this.deps.pairingStore.isApproved(channel.contactId);
       if (isApproved) {
         const approved = await this.deps.pairingStore.getApprovedContact(channel.contactId);
-        return {
+        // Only include tier if it's defined
+        const result: LinkedApprovalResult = {
           approved: true,
-          tier: approved?.tier,
           approvedContactId: channel.contactId,
         };
+        if (approved?.tier) {
+          result.tier = approved.tier;
+        }
+        return result;
       }
     }
 

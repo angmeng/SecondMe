@@ -5,11 +5,12 @@
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
+type ClientType = InstanceType<typeof Client>;
 import { redisClient } from '../redis/client.js';
 import path from 'path';
 
 class WhatsAppClient {
-  private client: Client;
+  private client: ClientType;
   private ready: boolean = false;
   private initializing: boolean = false;
   private initialized: boolean = false;
@@ -142,7 +143,7 @@ class WhatsAppClient {
     return this.ready && this.isBrowserConnected();
   }
 
-  getClient(): Client {
+  getClient(): ClientType {
     return this.client;
   }
 }

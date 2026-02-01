@@ -211,6 +211,14 @@ export interface Channel {
   // Messaging methods
   /** Send a message to a contact */
   sendMessage(to: string, content: MessageContent): Promise<SendResult>;
+  /** Send a voice message to a contact (TTS audio) */
+  sendVoice?(
+    to: string,
+    audio: {
+      base64: string;
+      mimeType: string;
+    }
+  ): Promise<SendResult>;
   /** Show typing indicator to a contact */
   sendTypingIndicator(to: string, durationMs?: number): Promise<void>;
 

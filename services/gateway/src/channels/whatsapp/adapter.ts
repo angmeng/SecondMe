@@ -13,6 +13,7 @@
  */
 
 import type { Client as WWJSClient, Message as WWJSMessage } from 'whatsapp-web.js';
+import { MessageMedia } from 'whatsapp-web.js';
 import { BaseChannel } from '../base-channel.js';
 import type {
   ChannelMessage,
@@ -256,6 +257,52 @@ export class WhatsAppChannel extends BaseChannel {
         to,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Send a voice message to a contact
+   * Phase 5: TTS voice response
+   *
+   * @param to - Contact ID to send to
+   * @param audio - Audio data with base64 content and mimeType
+   * @returns SendResult indicating success/failure
+   */
+  async sendVoice(
+    to: string,
+    audio: { base64: string; mimeType: string }
+  ): Promise<SendResult> {
+    if (!this.wwjsClient || !this.isConnected()) {
+      return { success: false, error: 'Not connected' };
+    }
+
+    try {
+      // Create MessageMedia from base64 data
+      // WhatsApp prefers OGG format but accepts MP3
+      // Match filename extension to actual MIME type
+      const ext = audio.mimeType === 'audio/mpeg' ? 'mp3' : 'ogg';
+      const media = new MessageMedia(audio.mimeType, audio.base64, `voice.${ext}`);
+
+      // Send as voice note (sendAudioAsVoice: true is critical for voice note display)
+      const message = await this.wwjsClient.sendMessage(to, media, {
+        sendAudioAsVoice: true,
+      });
+
+      this.logger.info('Voice message sent', {
+        channelId: this.id,
+        to,
+        messageId: message.id._serialized,
+      });
+
+      return { success: true, messageId: message.id._serialized };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Voice send failed';
+      this.logger.error('Failed to send voice message', {
+        channelId: this.id,
+        to,
+        error: errorMsg,
+      });
+      return { success: false, error: errorMsg };
     }
   }
 

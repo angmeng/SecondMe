@@ -95,9 +95,13 @@ export function rateLimitMiddleware(config: Partial<RateLimitConfig> = {}) {
 function getClientKey(req: Request): string {
   // Use X-Forwarded-For if behind a proxy, otherwise use remote IP
   const forwarded = req.headers['x-forwarded-for'];
-  const ip = typeof forwarded === 'string'
-    ? forwarded.split(',')[0].trim()
-    : req.socket.remoteAddress || 'unknown';
+  let ip: string;
+  if (typeof forwarded === 'string') {
+    const firstIp = forwarded.split(',')[0];
+    ip = firstIp?.trim() || 'unknown';
+  } else {
+    ip = req.socket.remoteAddress || 'unknown';
+  }
 
   return `rate:${ip}`;
 }
@@ -232,7 +236,7 @@ function sanitizeString(str: string): string {
 /**
  * Security Headers Middleware
  */
-export function securityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
+export function securityHeadersMiddleware(_req: Request, res: Response, next: NextFunction): void {
   // Prevent clickjacking
   res.setHeader('X-Frame-Options', 'DENY');
 
