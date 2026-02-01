@@ -11,6 +11,7 @@ import { buildGraphFromEntities } from '../ingestion/graph-builder.js';
 import { recordProcessedMessage, updateContactLastInteraction, updateContactRelationshipType } from '../automem/index.js';
 import { RelationshipAnalyzer, RelationshipType, RelationshipSignal } from '../analysis/relationship-analyzer.js';
 import { StyleAnalyzer } from '../analysis/style-analyzer.js';
+import { getConversationIndexer, type ConversationMessage as IndexerMessage } from '../embeddings/index.js';
 
 const SERVICE_NAME = 'Graph Worker Consumer';
 const REAL_TIME_QUEUE = 'QUEUE:messages_for_extraction';
@@ -24,6 +25,8 @@ interface ConsumerConfig {
   blockTimeMs: number;
   minMessagesForExtraction: number;
   extractionChunkMinutes: number;
+  /** Enable conversation embedding indexing (Task 5.1.2) */
+  enableConversationIndexing: boolean;
 }
 
 const DEFAULT_CONFIG: ConsumerConfig = {
@@ -31,6 +34,7 @@ const DEFAULT_CONFIG: ConsumerConfig = {
   blockTimeMs: 5000,
   minMessagesForExtraction: 3, // Minimum messages before triggering extraction
   extractionChunkMinutes: 60, // Group messages within 1 hour for extraction
+  enableConversationIndexing: process.env['CONVERSATION_INDEXING_ENABLED'] === 'true',
 };
 
 /**
@@ -539,10 +543,49 @@ class RedisConsumer {
         await updateContactLastInteraction(contactId, lastTimestamp);
       }
 
+      // Task 5.1.2: Index conversation chunks for semantic retrieval
+      if (this.config.enableConversationIndexing) {
+        await this.indexConversation(contactId, batch.messages);
+      }
+
       // Clear the batch
       this.extractionBatches.delete(contactId);
     } catch (error) {
       console.error(`[${SERVICE_NAME}] Error processing batch for ${contactId}:`, error);
+    }
+  }
+
+  /**
+   * Index conversation chunks for semantic retrieval (Task 5.1.2)
+   */
+  private async indexConversation(
+    contactId: string,
+    messages: Array<{ content: string; sender: string; timestamp: number }>
+  ): Promise<void> {
+    try {
+      const indexer = getConversationIndexer();
+
+      // Convert to indexer format
+      const indexerMessages: IndexerMessage[] = messages.map((m, i) => ({
+        id: `${contactId}-${m.timestamp}-${i}`,
+        role: m.sender === 'me' ? 'assistant' as const : 'user' as const,
+        content: m.content,
+        timestamp: m.timestamp,
+        sender: m.sender,
+      }));
+
+      const result = await indexer.indexContactConversations(contactId, indexerMessages);
+
+      if (result.chunksCreated > 0 || result.errors.length > 0) {
+        console.log(
+          `[${SERVICE_NAME}] Conversation indexing for ${contactId}: ` +
+          `${result.chunksCreated} created, ${result.chunksSkipped} skipped, ` +
+          `${result.errors.length} errors`
+        );
+      }
+    } catch (error) {
+      console.error(`[${SERVICE_NAME}] Conversation indexing error for ${contactId}:`, error);
+      // Don't fail the batch processing if indexing fails
     }
   }
 

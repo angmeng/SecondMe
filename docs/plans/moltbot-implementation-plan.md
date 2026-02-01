@@ -3,7 +3,7 @@
 **Created**: 2026-01-30
 **Updated**: 2026-02-01
 **Based on**: [Moltbot Research Findings](../research/moltbot-learnings.md)
-**Status**: Phase 3 Complete (Multi-Channel Support)
+**Status**: Phase 5 Complete (Enhanced RAG)
 
 ---
 
@@ -19,8 +19,8 @@ This plan translates moltbot learnings into actionable tasks for SecondMe, organ
 | P1 | Security Audit System | Low | Medium | None | ✅ Complete |
 | P1 | Plugin Architecture | High | High | None | ✅ Complete |
 | P2 | Multi-Channel Abstraction | Medium | High | Plugin Architecture | ✅ Complete |
-| P2 | Voice Message Support | Medium | Medium | None | 🔲 Not Started |
-| P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem | 🔲 Not Started |
+| P2 | Voice Message Support | Medium | Medium | None | ✅ Complete |
+| P3 | Enhanced RAG (Hybrid Search) | Medium | High | Existing AutoMem | ✅ Complete |
 | P3 | Onboarding Wizard | Medium | Medium | None | 🔲 Not Started |
 
 ---
@@ -1713,7 +1713,64 @@ Task 3.1.6 (Linking) ───── depends on ── Task 3.1.3 ───┘
 
 ---
 
-## Phase 4: Voice & Media (P2)
+## Phase 4 Completion Summary ✅
+
+**Completed**: 2026-02-01
+**Review**: All 3 tasks implemented (4.1.1-4.1.3), 100% complete
+
+### Implementation Highlights
+
+| Task | Files Created | Key Features |
+|------|---------------|--------------|
+| 4.1.1 Voice Transcription | `orchestrator/src/media/transcriber.ts` | OpenAI Whisper API, audio download, format handling |
+| 4.1.2 Text-to-Speech | `orchestrator/src/media/synthesizer.ts` | ElevenLabs API, voice synthesis node in workflow |
+| 4.1.3 Image Understanding | `orchestrator/src/langgraph/workflow.ts` | Claude Vision, base64 image processing |
+
+### Architecture
+
+```
+Voice Message Flow:
+Gateway → downloadMedia() → base64 audio → QUEUE:messages
+  → Orchestrator → mediaProcessingNode → Whisper transcription
+  → response generation → voiceSynthesisNode → ElevenLabs TTS
+  → QUEUE:responses (with audioBase64) → Gateway → sendVoice()
+
+Image Message Flow:
+Gateway → downloadMedia() → base64 image → QUEUE:messages
+  → Orchestrator → mediaProcessingNode → Claude Vision
+  → response generation → QUEUE:responses → Gateway
+```
+
+### New Files Created
+
+- `packages/shared-types/src/media.ts` - Media types (TranscriptionResult, SynthesisResult, etc.)
+- `services/orchestrator/src/media/transcriber.ts` - VoiceTranscriber class
+- `services/orchestrator/src/media/synthesizer.ts` - VoiceSynthesizer class
+- `services/orchestrator/src/media/index.ts` - Media module exports
+- `services/gateway/src/channels/whatsapp/adapter.ts` - sendVoice() method
+- `services/gateway/src/channels/telegram/adapter.ts` - sendVoice() method
+
+### Environment Variables
+
+```bash
+# Voice Transcription (Task 4.1.1)
+OPENAI_API_KEY=               # Required for Whisper
+VOICE_TRANSCRIPTION_ENABLED=true
+TRANSCRIPTION_TIMEOUT_MS=30000
+
+# Text-to-Speech (Task 4.1.2)
+ELEVENLABS_API_KEY=           # Required for TTS
+VOICE_OUTPUT_ENABLED=true
+ELEVENLABS_VOICE_ID=          # Optional custom voice
+TTS_MAX_CHARACTERS=500
+
+# Image Processing (Task 4.1.3)
+IMAGE_PROCESSING_ENABLED=true
+```
+
+---
+
+## Phase 4: Voice & Media (P2) ✅ COMPLETE
 
 ### Epic 4.1: Voice Message Support
 
@@ -1753,15 +1810,17 @@ export class VoiceTranscriber {
 ```
 
 **Acceptance Criteria**:
-- [ ] Voice messages detected and downloaded
-- [ ] Transcription via Whisper API
-- [ ] Transcribed text processed through normal flow
-- [ ] Original voice + transcription logged
-- [ ] Error handling for failed transcriptions
+- [x] Voice messages detected and downloaded
+- [x] Transcription via Whisper API
+- [x] Transcribed text processed through normal flow
+- [x] Original voice + transcription logged
+- [x] Error handling for failed transcriptions
+
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/media/transcriber.ts`)
 
 ---
 
-#### Task 4.1.2: Text-to-Speech Response (Optional)
+#### Task 4.1.2: Text-to-Speech Response ✅
 
 **Scope**: Generate voice responses using ElevenLabs
 
@@ -1782,14 +1841,16 @@ interface TTSConfig {
 ```
 
 **Acceptance Criteria**:
-- [ ] Text responses converted to audio
-- [ ] Audio sent as voice message
-- [ ] Configurable per-contact preference
-- [ ] Fallback to text on TTS failure
+- [x] Text responses converted to audio
+- [x] Audio sent as voice message
+- [ ] Configurable per-contact preference (deferred - future enhancement)
+- [x] Fallback to text on TTS failure
+
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/media/synthesizer.ts`)
 
 ---
 
-#### Task 4.1.3: Image Understanding
+#### Task 4.1.3: Image Understanding ✅
 
 **Scope**: Process image messages using Claude's vision
 
@@ -1809,15 +1870,66 @@ Image Message → Download → Resize/optimize → Claude Vision → Response
 4. Process response normally
 
 **Acceptance Criteria**:
-- [ ] Image messages detected
-- [ ] Images passed to Claude as vision content
-- [ ] Response describes/discusses image
-- [ ] Large images resized appropriately
-- [ ] Multiple images in conversation supported
+- [x] Image messages detected
+- [x] Images passed to Claude as vision content
+- [x] Response describes/discusses image
+- [x] Large images resized appropriately
+- [x] Multiple images in conversation supported
+
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/langgraph/workflow.ts` mediaProcessingNode)
 
 ---
 
-## Phase 5: Enhanced RAG (P3)
+## Phase 5 Completion Summary ✅
+
+**Completed**: 2026-02-01
+**Review**: All 3 tasks implemented (5.1.1-5.1.3), 100% complete
+
+### Implementation Highlights
+
+| Task | Files Created | Key Features |
+|------|---------------|--------------|
+| 5.1.1 Embedding Provider | `orchestrator/src/embeddings/provider.ts`, `openai.ts`, `voyage.ts`, `registry.ts` | Abstract provider interface, OpenAI & Voyage implementations, caching, circuit breaker |
+| 5.1.2 Conversation Index | `graph-worker/src/embeddings/conversation-indexer.ts` | Topic/time chunking, AutoMem storage, deduplication |
+| 5.1.3 Retrieval Fusion | `orchestrator/src/retrieval/fusion.ts` | Multi-source fusion, configurable weights, token budget |
+
+### Architecture
+
+```
+Embedding Provider Abstraction:
+EmbeddingProvider (interface)
+  ├── OpenAIEmbeddings (text-embedding-3-small)
+  └── VoyageEmbeddings (voyage-3)
+      └── EmbeddingRegistry (singleton factory with fallback)
+
+Conversation Indexing Flow:
+Messages → ConversationIndexer.chunkMessages() → generateChunkId()
+  → indexChunk() → AutoMem.store() → markChunkIndexed()
+
+Retrieval Fusion:
+Query → [semantic, keyword, graph, history] (parallel)
+  → fuseResults() → rankAndDeduplicate() → applyTokenBudget()
+  → FusionResult (context + history)
+```
+
+### Environment Variables
+
+```bash
+# Embedding Provider (Task 5.1.1)
+EMBEDDING_PROVIDER=voyage          # 'voyage' or 'openai'
+VOYAGE_API_KEY=                    # For Voyage embeddings
+OPENAI_API_KEY=                    # For OpenAI embeddings
+
+# Conversation Indexing (Task 5.1.2)
+CONVERSATION_INDEXING_ENABLED=true # Enable auto-indexing
+
+# Retrieval Fusion (Task 5.1.3)
+RETRIEVAL_FUSION_ENABLED=true      # Enable multi-source fusion
+```
+
+---
+
+## Phase 5: Enhanced RAG (P3) ✅ COMPLETE
 
 ### Epic 5.1: Hybrid Search Enhancement
 
@@ -1849,10 +1961,12 @@ export class VoyageEmbeddings implements EmbeddingProvider { ... }
 ```
 
 **Acceptance Criteria**:
-- [ ] Provider abstraction allows swapping
-- [ ] Batch embedding for efficiency
-- [ ] Configurable provider selection
-- [ ] Caching of frequent embeddings
+- [x] Provider abstraction allows swapping
+- [x] Batch embedding for efficiency
+- [x] Configurable provider selection
+- [x] Caching of frequent embeddings
+
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/embeddings/`)
 
 ---
 
@@ -1870,10 +1984,12 @@ New messages → Chunk by topic/time → Generate embeddings → Store in AutoMe
 ```
 
 **Acceptance Criteria**:
-- [ ] Conversations chunked intelligently
-- [ ] Embeddings generated for each chunk
-- [ ] Stored with proper tags for retrieval
-- [ ] Deduplication of existing chunks
+- [x] Conversations chunked intelligently
+- [x] Embeddings generated for each chunk
+- [x] Stored with proper tags for retrieval
+- [x] Deduplication of existing chunks
+
+**Status**: ✅ Complete (implemented in `services/graph-worker/src/embeddings/`)
 
 ---
 
@@ -1893,10 +2009,12 @@ New messages → Chunk by topic/time → Generate embeddings → Store in AutoMe
 5. Apply token budget
 
 **Acceptance Criteria**:
-- [ ] Multiple retrieval sources combined
-- [ ] Configurable weights per source
-- [ ] Deduplication of results
-- [ ] Token budget respected
+- [x] Multiple retrieval sources combined
+- [x] Configurable weights per source
+- [x] Deduplication of results
+- [x] Token budget respected
+
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/retrieval/fusion.ts`)
 
 ---
 
