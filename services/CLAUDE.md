@@ -22,12 +22,16 @@ services/
 │       ├── falkordb/  # Cypher queries
 │       ├── history/   # Conversation history RAG (keyword chunking)
 │       ├── media/     # Voice transcription (Whisper), image processing
+│       ├── embeddings/# Embedding providers (OpenAI, Voyage)
+│       ├── retrieval/ # RAG retrieval fusion
 │       ├── config/    # Feature configurations
 │       ├── hts/       # Human typing simulation
 │       └── redis/     # Consumer, persona cache
 └── graph-worker/      # Knowledge ingestion (port 3003)
     └── src/
         ├── ingestion/ # Parser, extractor, graph builder
+        ├── embeddings/# Conversation indexing for semantic search
+        ├── config/    # Configuration (stopwords, etc.)
         ├── falkordb/  # Mutations
         └── redis/     # Consumer
 ```
@@ -410,6 +414,103 @@ TRANSCRIPTION_TIMEOUT_MS=30000     # API timeout
 - `TranscriptionConfig` - Transcriber settings
 - `DEFAULT_MEDIA_LIMITS` - Size limits for validation
 
+### Embedding Providers (Phase 5)
+
+The orchestrator supports multiple embedding providers with automatic fallback.
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `embeddings/provider.ts` | Abstract base class with caching and circuit breaker |
+| `embeddings/openai.ts` | OpenAI text-embedding-3-small (1536 dimensions) |
+| `embeddings/voyage.ts` | Voyage voyage-3 (1024 dimensions) |
+| `embeddings/registry.ts` | Provider factory with fallback support |
+
+**Provider Abstraction:**
+```typescript
+// Get configured provider (auto-fallback if primary unavailable)
+const provider = embeddingRegistry.getAvailableProvider();
+
+// Embed single text (with Redis caching)
+const result = await provider.embed('search query');
+// Returns: { embedding: number[], fromCache: boolean, tokensUsed: number }
+
+// Batch embedding
+const results = await provider.embedBatch(['text1', 'text2']);
+```
+
+**Voyage Input Types:**
+```typescript
+// Voyage supports query vs document embedding
+const voyageProvider = getVoyageEmbeddings();
+
+// For search queries
+const queryEmbed = await voyageProvider.embedWithType('search query', 'query');
+
+// For documents to be indexed
+const docEmbed = await voyageProvider.embedWithType('document content', 'document');
+```
+
+**Circuit Breaker:**
+- Opens after 5 consecutive failures (configurable)
+- Auto-resets after 60 seconds
+- Prevents cascading failures to embedding APIs
+
+**Environment Variables:**
+```bash
+EMBEDDING_PROVIDER=voyage      # 'voyage' or 'openai' (default: voyage)
+VOYAGE_API_KEY=               # Required for Voyage
+OPENAI_API_KEY=               # Required for OpenAI
+```
+
+### Retrieval Fusion (Phase 5)
+
+Multi-source retrieval combining semantic, keyword, graph, and history sources.
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `retrieval/fusion.ts` | RetrievalFusion class with weighted scoring |
+| `retrieval/hybrid-retriever.ts` | Legacy semantic retriever |
+| `retrieval/index.ts` | Module exports |
+
+**Fusion Strategy:**
+```
+Query → [semantic, keyword, graph, history] (parallel)
+  → fuseResults() → rankAndDeduplicate() → applyTokenBudget()
+  → FusionResult (context + history)
+```
+
+**Default Weights:**
+| Source | Weight | Description |
+|--------|--------|-------------|
+| Semantic | 0.4 | AutoMem vector search |
+| Graph | 0.3 | FalkorDB entity relationships |
+| Keyword | 0.2 | Keyword-based filtering |
+| History | 0.1 | Conversation history context |
+
+**Usage:**
+```typescript
+const fusion = getRetrievalFusion();
+
+const result = await fusion.retrieve('user message', 'contact-123');
+// Returns: FusionResult with context, history, stats
+
+console.log(result.method);        // 'fusion' | 'legacy'
+console.log(result.stats.tokenEstimate);
+console.log(result.stats.sourcesUsed); // ['semantic', 'graph', 'history']
+```
+
+**Token Budget:**
+- Default: 2000 tokens
+- Automatically trims results proportionally when budget exceeded
+- Preserves at least 1 item per category
+
+**Environment Variables:**
+```bash
+RETRIEVAL_FUSION_ENABLED=true  # Enable fusion (default: false)
+```
+
 ## Graph Worker Service
 
 ### Purpose
@@ -435,6 +536,57 @@ Ingests chat history, extracts entities, and builds knowledge graph relationship
 - `WORKS_AT` - Person → Company affiliation
 - `MENTIONED` - Message → Entity reference
 - `DISCUSSED` - Conversation → Topic link
+
+### Conversation Indexing (Phase 5)
+
+Indexes conversation chunks for semantic retrieval via AutoMem.
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `embeddings/conversation-indexer.ts` | Chunking, indexing, deduplication |
+| `config/stopwords.ts` | Configurable stopword list |
+
+**Chunking Algorithm:**
+```typescript
+// Messages are chunked by:
+// 1. Time gap (default: 30 minutes)
+// 2. Keyword overlap ratio (threshold: 0.2)
+// 3. Max chunk size (default: 20 messages)
+const chunks = indexer.chunkMessages('contact-id', messages);
+```
+
+**Indexing Flow:**
+```
+Messages → chunkMessages() → generateChunkId() (SHA256 hash)
+  → isChunkIndexed() → indexChunk() → AutoMem.store()
+  → markChunkIndexed() (Redis)
+```
+
+**Deduplication:**
+- Chunk IDs are content-based hashes
+- Already-indexed chunks are skipped
+- Redis key: `INDEXED:conversation:{chunkId}`
+
+**Usage:**
+```typescript
+const indexer = getConversationIndexer();
+
+// Index all conversations for a contact
+const result = await indexer.indexContactConversations('contact-123', messages);
+// Returns: { chunksCreated: 5, chunksSkipped: 2, errors: [] }
+
+// Clear indexed status for reindexing
+await indexer.clearIndexedStatus('contact-123');
+```
+
+**Integration:**
+Indexing is triggered automatically in `redis/consumer.ts` when `CONVERSATION_INDEXING_ENABLED=true`.
+
+**Environment Variables:**
+```bash
+CONVERSATION_INDEXING_ENABLED=true  # Enable auto-indexing
+```
 
 ## Redis Patterns
 

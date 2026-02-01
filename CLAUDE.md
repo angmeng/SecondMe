@@ -114,6 +114,9 @@ WhatsApp/Telegram ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `SKILLS:config:{skillId}` - JSON config per skill (no TTL)
 - `LINKED:phone:{normalizedPhone}` - Cross-channel contact linking by phone (no TTL)
 - `LINKED:contact:{contactId}` - Reverse lookup: contactId → phone (no TTL)
+- `EMB:{provider}:{hash}` - Cached embeddings (5-min TTL)
+- `EMB:voyage:{type}:{hash}` - Voyage embeddings with input type (5-min TTL)
+- `INDEXED:conversation:{chunkId}` - Indexed conversation chunk marker (no TTL)
 
 ### Environment Variables
 Required in `.env`:
@@ -129,6 +132,13 @@ Optional for media processing (Phase 4):
 - `MEDIA_MAX_SIZE_MB` - Whisper file size limit (default: `25`)
 - `TRANSCRIPTION_TIMEOUT_MS` - API timeout (default: `30000`)
 - `MAX_QUEUE_PAYLOAD_MB` - Redis queue payload limit (default: `10`)
+
+Optional for enhanced RAG (Phase 5):
+- `EMBEDDING_PROVIDER` - Embedding provider: `voyage` or `openai` (default: `voyage`)
+- `VOYAGE_API_KEY` - Required for Voyage embeddings
+- `CONVERSATION_INDEXING_ENABLED` - Auto-index conversations (default: `false`)
+- `RETRIEVAL_FUSION_ENABLED` - Multi-source retrieval fusion (default: `false`)
+- `SEMANTIC_RAG_ENABLED` - Enable semantic RAG with AutoMem (default: `false`)
 
 ## Environment Setup
 

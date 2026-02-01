@@ -9,6 +9,7 @@
 import { createHash } from 'crypto';
 import { automemClient, type StoreMemoryRequest } from '../automem/client.js';
 import { redisClient } from '../redis/client.js';
+import { DEFAULT_STOPWORDS } from '../config/stopwords.js';
 
 const SERVICE_NAME = 'Conversation Indexer';
 
@@ -75,30 +76,6 @@ export interface IndexingResult {
   error?: string;
 }
 
-/**
- * Common English stopwords to filter out
- */
-const STOPWORDS = new Set([
-  'a', 'an', 'the', 'this', 'that', 'these', 'those',
-  'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them',
-  'my', 'your', 'his', 'its', 'our', 'their', 'mine', 'yours', 'ours', 'theirs',
-  'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about',
-  'and', 'but', 'or', 'nor', 'so', 'yet', 'both', 'either', 'neither',
-  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
-  'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
-  'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can',
-  'get', 'got', 'make', 'made', 'go', 'going', 'went', 'gone',
-  'know', 'knew', 'think', 'thought', 'see', 'saw', 'want', 'wanted',
-  'just', 'also', 'now', 'then', 'here', 'there', 'when', 'where', 'why', 'how',
-  'very', 'really', 'actually', 'probably', 'maybe', 'always', 'never',
-  'good', 'great', 'nice', 'bad', 'new', 'old', 'big', 'small',
-  'what', 'which', 'who', 'whom', 'whose',
-  'yeah', 'yes', 'yep', 'no', 'nope', 'okay', 'ok', 'sure', 'thanks',
-  'hey', 'hello', 'hi', 'bye', 'lol', 'haha', 'wow', 'cool',
-  'today', 'tomorrow', 'yesterday', 'time', 'day', 'week', 'month', 'year',
-  'let', 'dont', 'didnt', 'doesnt', 'wont', 'cant', 'isnt', 'arent',
-  'something', 'anything', 'nothing', 'everything',
-]);
 
 /**
  * Conversation Indexer class
@@ -126,7 +103,7 @@ export class ConversationIndexer {
 
     for (const word of words) {
       const cleanWord = word.replace(/'/g, '');
-      if (cleanWord.length >= this.config.minWordLength && !STOPWORDS.has(cleanWord)) {
+      if (cleanWord.length >= this.config.minWordLength && !DEFAULT_STOPWORDS.has(cleanWord)) {
         keywords.add(cleanWord);
       }
     }
@@ -398,12 +375,36 @@ export class ConversationIndexer {
   }
 
   /**
+   * Scan for keys matching a pattern (production-safe alternative to KEYS)
+   * Uses SCAN command which iterates without blocking Redis
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    const stream = redisClient.client.scanStream({
+      match: pattern,
+      count: 100, // Batch size per SCAN iteration
+    });
+
+    return new Promise((resolve, reject) => {
+      stream.on('data', (resultKeys: string[]) => {
+        keys.push(...resultKeys);
+      });
+      stream.on('end', () => {
+        resolve(keys);
+      });
+      stream.on('error', (error) => {
+        reject(error);
+      });
+    });
+  }
+
+  /**
    * Get indexed chunks for a contact
    */
   async getIndexedChunks(contactId: string): Promise<string[]> {
     try {
       const pattern = `${this.config.indexedKeyPrefix}${contactId}:*`;
-      const keys = await redisClient.client.keys(pattern);
+      const keys = await this.scanKeys(pattern);
       return keys.map((k) => k.replace(this.config.indexedKeyPrefix, ''));
     } catch (error) {
       console.warn(`[${SERVICE_NAME}] Error getting indexed chunks:`, error);
@@ -417,13 +418,19 @@ export class ConversationIndexer {
   async clearIndexedStatus(contactId: string): Promise<number> {
     try {
       const pattern = `${this.config.indexedKeyPrefix}${contactId}:*`;
-      const keys = await redisClient.client.keys(pattern);
+      const keys = await this.scanKeys(pattern);
 
       if (keys.length === 0) {
         return 0;
       }
 
-      await redisClient.client.del(...keys);
+      // Delete in batches to avoid overwhelming Redis
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+        const batch = keys.slice(i, i + BATCH_SIZE);
+        await redisClient.client.del(...batch);
+      }
+
       console.log(`[${SERVICE_NAME}] Cleared ${keys.length} indexed chunks for ${contactId}`);
       return keys.length;
     } catch (error) {

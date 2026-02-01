@@ -502,9 +502,9 @@ export class RetrievalFusion {
     // Need to trim - prioritize proportionally
     const ratio = remainingBudget / totalEntityTokens;
 
-    const maxTopics = Math.floor((topics.length * ratio) + 0.5);
-    const maxPeople = Math.floor((people.length * ratio) + 0.5);
-    const maxEvents = Math.floor((events.length * ratio) + 0.5);
+    const maxTopics = Math.round(topics.length * ratio);
+    const maxPeople = Math.round(people.length * ratio);
+    const maxEvents = Math.round(events.length * ratio);
 
     const trimmedTopics = topics.slice(0, Math.max(1, maxTopics));
     const trimmedPeople = people.slice(0, Math.max(1, maxPeople));
