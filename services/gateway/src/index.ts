@@ -35,8 +35,8 @@ import type { DownloadedMedia } from '@secondme/shared-types';
 import { ContactLinker } from './contact-linking/index.js';
 import express from 'express';
 
-const PORT = process.env.GATEWAY_PORT || 3001;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = process.env['GATEWAY_PORT'] || 3001;
+const NODE_ENV = process.env['NODE_ENV'] || 'development';
 
 // Express app for health checks and status endpoints
 const app = express();
@@ -48,7 +48,7 @@ const httpServer = createServer(app);
 // Socket.io server for real-time QR code and event streaming
 export const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env['FRONTEND_URL'] || 'http://localhost:3000',
     methods: ['GET', 'POST'],
   },
 });
@@ -77,7 +77,7 @@ let channelRouter: ChannelRouter;
 let contactLinker: ContactLinker;
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     service: 'gateway',
@@ -88,30 +88,31 @@ app.get('/health', (req, res) => {
 });
 
 // Session status endpoint
-app.get('/api/session', (req, res) => {
+app.get('/api/session', (_req, res): void => {
   try {
     if (!sessionManager) {
-      return res.status(503).json({
+      res.status(503).json({
         error: 'Session manager not initialized',
       });
+      return;
     }
 
     const status = sessionManager.getStatus();
     res.json(status);
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message || 'Failed to get session status',
-    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to get session status';
+    res.status(500).json({ error: message });
   }
 });
 
 // Session refresh endpoint
-app.post('/api/session/refresh', async (req, res) => {
+app.post('/api/session/refresh', async (_req, res): Promise<void> => {
   try {
     if (!sessionManager) {
-      return res.status(503).json({
+      res.status(503).json({
         error: 'Session manager not initialized',
       });
+      return;
     }
 
     await sessionManager.refreshSession();
@@ -119,28 +120,27 @@ app.post('/api/session/refresh', async (req, res) => {
       success: true,
       message: 'Session refresh initiated. Please scan the new QR code.',
     });
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message || 'Failed to refresh session',
-    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to refresh session';
+    res.status(500).json({ error: message });
   }
 });
 
 // Channel status endpoint - get all registered channels with status
-app.get('/api/channels', async (req, res) => {
+app.get('/api/channels', async (_req, res): Promise<void> => {
   try {
     if (!channelManager) {
-      return res.status(503).json({
+      res.status(503).json({
         error: 'Channel manager not initialized',
       });
+      return;
     }
 
     const status = await channelManager.getStatus();
     res.json({ channels: status });
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message || 'Failed to get channel status',
-    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to get channel status';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -153,46 +153,53 @@ function isValidChannelId(id: string): id is ValidChannelId {
 }
 
 // Enable a channel
-app.post('/api/channels/:channelId/enable', async (req, res) => {
+app.post('/api/channels/:channelId/enable', async (req, res): Promise<void> => {
   const { channelId } = req.params;
   try {
     if (!channelManager) {
-      return res.status(503).json({ error: 'Channel manager not initialized' });
+      res.status(503).json({ error: 'Channel manager not initialized' });
+      return;
     }
     if (!isValidChannelId(channelId)) {
-      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+      res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+      return;
     }
     await channelManager.enable(channelId);
     res.json({ success: true, channelId, status: 'enabled' });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message || 'Failed to enable channel' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to enable channel';
+    res.status(400).json({ error: message });
   }
 });
 
 // Disable a channel
-app.post('/api/channels/:channelId/disable', async (req, res) => {
+app.post('/api/channels/:channelId/disable', async (req, res): Promise<void> => {
   const { channelId } = req.params;
   try {
     if (!channelManager) {
-      return res.status(503).json({ error: 'Channel manager not initialized' });
+      res.status(503).json({ error: 'Channel manager not initialized' });
+      return;
     }
     if (!isValidChannelId(channelId)) {
-      return res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+      res.status(400).json({ error: `Unknown channel: ${channelId}. Valid channels: ${VALID_CHANNEL_IDS.join(', ')}` });
+      return;
     }
     await channelManager.disable(channelId);
     res.json({ success: true, channelId, status: 'disabled' });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message || 'Failed to disable channel' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to disable channel';
+    res.status(400).json({ error: message });
   }
 });
 
 // Contacts refresh endpoint - manually trigger re-fetch from WhatsApp
-app.post('/api/contacts/refresh', async (req, res) => {
+app.post('/api/contacts/refresh', async (_req, res): Promise<void> => {
   try {
     if (!contactManager) {
-      return res.status(503).json({
+      res.status(503).json({
         error: 'WhatsApp not ready. Contact manager not initialized.',
       });
+      return;
     }
 
     const contacts = await contactManager.fetchAndCacheContacts();
@@ -201,33 +208,34 @@ app.post('/api/contacts/refresh', async (req, res) => {
       count: contacts.length,
       message: `Successfully refreshed ${contacts.length} contacts`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Gateway] Error refreshing contacts:', error);
-    res.status(500).json({
-      error: error.message || 'Failed to refresh contacts',
-    });
+    const message = error instanceof Error ? error.message : 'Failed to refresh contacts';
+    res.status(500).json({ error: message });
   }
 });
 
 // Chat messages endpoint - fetch message history from WhatsApp
-app.get('/api/chats/:contactId/messages', async (req, res) => {
+app.get('/api/chats/:contactId/messages', async (req, res): Promise<void> => {
   try {
     if (!whatsappClient.isReady()) {
-      return res.status(503).json({
+      res.status(503).json({
         error: 'WhatsApp not ready',
         messages: [],
       });
+      return;
     }
 
     const { contactId } = req.params;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = parseInt(req.query['limit'] as string) || 50;
 
     // Validate contactId format
     if (!contactId || !contactId.includes('@')) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid contact ID format',
         messages: [],
       });
+      return;
     }
 
     const messages = await fetchChatMessages(
@@ -242,21 +250,23 @@ app.get('/api/chats/:contactId/messages', async (req, res) => {
 
     // Handle WhatsApp disconnected/detached frame error
     if (error instanceof WhatsAppDisconnectedError) {
-      return res.status(503).json({
+      res.status(503).json({
         error: error.message,
         messages: [],
         needsReconnect: true,
       });
+      return;
     }
 
     const errorMessage = error instanceof Error ? error.message : 'Failed to fetch messages';
 
     // Handle specific WhatsApp errors gracefully
     if (errorMessage.includes('not found')) {
-      return res.json({
+      res.json({
         messages: [],
         error: 'Chat not found',
       });
+      return;
     }
 
     res.status(500).json({
@@ -298,6 +308,7 @@ io.on('connection', (socket) => {
 
 /**
  * Response consumer loop - consumes responses from Orchestrator and sends them
+ * Phase 5: Added voice message support (TTS audio responses)
  */
 async function startResponseConsumer() {
   let lastId = '$'; // Start from latest
@@ -313,15 +324,70 @@ async function startResponseConsumer() {
 
         for (const response of responses) {
           try {
-            const { contactId, content, typingDelay, thinkTime } = response.payload;
-
-            // Send message with enhanced HTS typing indicator
-            const result = await messageSender.sendMessage(contactId, content, {
+            const {
+              contactId,
+              content,
               typingDelay,
               thinkTime,
-              simulateTyping: true,
-              usePhaseTyping: thinkTime > 0,
-            });
+              audioBase64,
+              audioMimeType,
+            } = response.payload;
+
+            let result;
+
+            // Phase 5: Check if we have TTS audio to send
+            // Runtime validation for audio fields
+            const hasValidAudio =
+              typeof audioBase64 === 'string' &&
+              audioBase64.length > 0 &&
+              typeof audioMimeType === 'string' &&
+              audioMimeType.startsWith('audio/');
+
+            if (hasValidAudio) {
+              // Determine channel from contactId prefix
+              const channelId = contactId.startsWith('tg_') ? 'telegram' : 'whatsapp';
+              const channel = channelManager.get(channelId);
+
+              if (channel && typeof channel.sendVoice === 'function') {
+                // Send voice message
+                result = await channel.sendVoice(contactId, {
+                  base64: audioBase64,
+                  mimeType: audioMimeType,
+                });
+
+                // Fallback to text if voice send fails
+                if (!result.success) {
+                  console.warn(
+                    `[Gateway] Voice send failed, falling back to text: ${result.error}`
+                  );
+                  result = await messageSender.sendMessage(contactId, content, {
+                    typingDelay,
+                    thinkTime,
+                    simulateTyping: true,
+                    usePhaseTyping: thinkTime > 0,
+                  });
+                }
+              } else {
+                // Channel doesn't support sendVoice, fallback to text
+                console.log(
+                  `[Gateway] Channel ${channelId} does not support sendVoice, sending text`
+                );
+                result = await messageSender.sendMessage(contactId, content, {
+                  typingDelay,
+                  thinkTime,
+                  simulateTyping: true,
+                  usePhaseTyping: thinkTime > 0,
+                });
+              }
+            } else {
+              // No audio, send text message (existing flow)
+              result = await messageSender.sendMessage(contactId, content, {
+                typingDelay,
+                thinkTime,
+                simulateTyping: true,
+                usePhaseTyping: thinkTime > 0,
+              });
+            }
 
             if (result.success) {
               console.log(`[Gateway] Response sent to ${contactId}: ${result.messageId}`);
@@ -340,7 +406,8 @@ async function startResponseConsumer() {
                 contactId,
                 messageId: result.messageId,
                 timestamp: Date.now(),
-                delayMs: result.actualDelayMs,
+                // delayMs only available from text responses via messageSender
+                // Voice responses don't have this field
               });
             } else {
               console.error(`[Gateway] Failed to send response to ${contactId}: ${result.error}`);

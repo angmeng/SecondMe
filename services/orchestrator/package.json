@@ -8,11 +8,13 @@
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "build": "tsc",
     "start": "node --env-file=../../.env dist/index.js",
+    "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:watch": "vitest watch"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@elevenlabs/elevenlabs-js": "^2.33.0",
     "@langchain/langgraph": "^1.0.7",
     "@secondme/shared-types": "*",
     "dotenv": "^17.2.3",

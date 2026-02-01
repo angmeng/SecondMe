@@ -20,7 +20,8 @@ import {
   queueDeferredMessage,
 } from '../hts/index.js';
 import { RelationshipSignal } from './relationship-signals.js';
-import { getVoiceTranscriber } from '../media/index.js';
+import { getVoiceTranscriber, getVoiceSynthesizer } from '../media/index.js';
+import { metricsCollector } from '../metrics/collector.js';
 import type { ImageContent, MediaType } from '@secondme/shared-types';
 
 /**
@@ -100,6 +101,11 @@ export interface WorkflowState {
 
   // Error handling
   error?: string;
+
+  // TTS fields (Phase 5)
+  shouldSynthesizeVoice?: boolean;
+  audioBase64?: string;
+  audioMimeType?: string;
 }
 
 // Token usage log for analytics
@@ -221,9 +227,11 @@ async function mediaProcessingNode(state: WorkflowState): Promise<Partial<Workfl
       );
 
       // Replace content with transcription, keeping original as context
+      // Also flag for voice response synthesis (Phase 5 TTS)
       return {
         transcribedText: result.text,
         content: `[Voice message transcription]: ${result.text}`,
+        shouldSynthesizeVoice: true,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -485,6 +493,44 @@ async function calculateEnhancedTypingDelay(
 }
 
 /**
+ * Synthesize voice response using ElevenLabs TTS
+ * Phase 5: Only synthesizes when incoming message was a voice message
+ */
+async function voiceSynthesisNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
+  // Skip if no response or synthesis not needed
+  if (!state.response || !state.shouldSynthesizeVoice) {
+    return {};
+  }
+
+  const synthesizer = getVoiceSynthesizer();
+  if (!synthesizer.isEnabled()) {
+    console.log('[Workflow] Voice synthesis disabled, skipping');
+    return {};
+  }
+
+  const startTime = Date.now();
+
+  try {
+    const result = await synthesizer.synthesize(state.response);
+    const latencyMs = Date.now() - startTime;
+
+    console.log(`[Workflow] Voice synthesized: ${result.sizeBytes} bytes in ${latencyMs}ms`);
+
+    // Record TTS metrics
+    await metricsCollector.recordVoiceSynthesis(result.sizeBytes, latencyMs);
+
+    return {
+      audioBase64: result.base64,
+      audioMimeType: result.mimeType,
+    };
+  } catch (error) {
+    console.error('[Workflow] Voice synthesis failed:', error);
+    // Graceful fallback to text response
+    return {};
+  }
+}
+
+/**
  * Queue response to Gateway for sending
  * T093: Includes enhanced HTS timing data
  */
@@ -499,6 +545,7 @@ async function queueResponseNode(state: WorkflowState): Promise<Partial<Workflow
   try {
     // Add response to Redis stream for Gateway to consume
     // Include HTS timing data for enhanced typing simulation
+    // Include TTS audio fields if voice synthesis was performed (Phase 5)
     const responsePayload = JSON.stringify({
       contactId: state.contactId,
       content: state.response,
@@ -508,6 +555,9 @@ async function queueResponseNode(state: WorkflowState): Promise<Partial<Workflow
       cognitivePause: state.cognitivePause || 0,
       classification: state.classification,
       tokensUsed: state.tokensUsed,
+      // TTS audio fields (Phase 5) - only include if present
+      ...(state.audioBase64 && { audioBase64: state.audioBase64 }),
+      ...(state.audioMimeType && { audioMimeType: state.audioMimeType }),
     });
 
     await redisClient.client.xadd('QUEUE:responses', '*', 'payload', responsePayload);
@@ -590,10 +640,20 @@ function afterGraphQuery(state: WorkflowState): string {
 }
 
 /**
- * Routing logic - after response generation, queue it
+ * Routing logic - after response generation, proceed to voice synthesis
  */
-function shouldQueueResponse(state: WorkflowState): string {
+function shouldSynthesizeVoice(state: WorkflowState): string {
   if (state.error || !state.response) {
+    return END;
+  }
+  return 'voice_synthesis';
+}
+
+/**
+ * Routing logic - after voice synthesis, queue the response
+ */
+function afterVoiceSynthesis(state: WorkflowState): string {
+  if (state.error) {
     return END;
   }
   return 'queue_response';
@@ -652,6 +712,10 @@ const WorkflowStateAnnotation = Annotation.Root({
   lastMessageTimestamp: Annotation<number | undefined>,
   // Error
   error: Annotation<string | undefined>,
+  // TTS fields (Phase 5)
+  shouldSynthesizeVoice: Annotation<boolean | undefined>,
+  audioBase64: Annotation<string | undefined>,
+  audioMimeType: Annotation<string | undefined>,
 });
 
 /**
@@ -697,6 +761,7 @@ export function buildWorkflow() {
   workflow.addNode('phatic_response', phaticResponseNode);
   workflow.addNode('graph_query', contextRetrievalNode);
   workflow.addNode('substantive_response', substantiveResponseNode);
+  workflow.addNode('voice_synthesis', voiceSynthesisNode); // Phase 5: TTS
   workflow.addNode('queue_response', queueResponseNode);
 
   // Set entry point
@@ -724,8 +789,8 @@ export function buildWorkflow() {
     [END]: END,
   });
 
-  workflow.addConditionalEdges('phatic_response', shouldQueueResponse, {
-    queue_response: 'queue_response',
+  workflow.addConditionalEdges('phatic_response', shouldSynthesizeVoice, {
+    voice_synthesis: 'voice_synthesis',
     [END]: END,
   });
 
@@ -734,7 +799,12 @@ export function buildWorkflow() {
     [END]: END,
   });
 
-  workflow.addConditionalEdges('substantive_response', shouldQueueResponse, {
+  workflow.addConditionalEdges('substantive_response', shouldSynthesizeVoice, {
+    voice_synthesis: 'voice_synthesis',
+    [END]: END,
+  });
+
+  workflow.addConditionalEdges('voice_synthesis', afterVoiceSynthesis, {
     queue_response: 'queue_response',
     [END]: END,
   });

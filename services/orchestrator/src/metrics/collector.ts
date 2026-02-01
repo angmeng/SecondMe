@@ -16,6 +16,10 @@ export interface SystemMetrics {
   uptime: number;
   activePauses: number;
   deferredMessages: number;
+  // TTS metrics (Phase 5)
+  voiceSynthesisCount: number;
+  voiceSynthesisBytes: number;
+  avgVoiceSynthesisLatency: number;
 }
 
 export interface MessageMetrics {
@@ -117,6 +121,30 @@ class MetricsCollector {
   }
 
   /**
+   * Record a voice synthesis event (Phase 5 TTS)
+   * @param sizeBytes - Size of synthesized audio in bytes
+   * @param latencyMs - Time taken to synthesize in milliseconds
+   */
+  async recordVoiceSynthesis(sizeBytes: number, latencyMs: number): Promise<void> {
+    try {
+      const dateKey = new Date().toISOString().split('T')[0];
+      const statsKey = `STATS:tokens:${dateKey}`;
+
+      await redisClient.client.hincrby(statsKey, 'voice_synthesis_count', 1);
+      await redisClient.client.hincrby(statsKey, 'voice_synthesis_bytes', sizeBytes);
+      await redisClient.client.hincrby(statsKey, 'voice_synthesis_latency', latencyMs);
+
+      // Set expiry on stats key (30 days) if not already set
+      await redisClient.client.expire(statsKey, 30 * 24 * 60 * 60);
+
+      // Invalidate cache
+      this.cacheExpiry = 0;
+    } catch (error) {
+      console.error('[MetricsCollector] Error recording voice synthesis:', error);
+    }
+  }
+
+  /**
    * Get current system metrics
    */
   async getMetrics(): Promise<SystemMetrics> {
@@ -134,13 +162,17 @@ class MetricsCollector {
       // Get daily stats
       const stats = await redisClient.client.hgetall(statsKey);
 
-      const messagesReceived = parseInt(stats.messages_received || '0', 10);
-      const messagesSent = parseInt(stats.messages_sent || '0', 10);
-      const classificationTokens = parseInt(stats.classification_tokens || '0', 10);
-      const responseTokens = parseInt(stats.response_tokens || '0', 10);
-      const cacheReadTokens = parseInt(stats.cache_read_tokens || '0', 10);
-      const cacheWriteTokens = parseInt(stats.cache_write_tokens || '0', 10);
-      const totalLatency = parseInt(stats.total_latency || '0', 10);
+      const messagesReceived = parseInt(stats['messages_received'] || '0', 10);
+      const messagesSent = parseInt(stats['messages_sent'] || '0', 10);
+      const classificationTokens = parseInt(stats['classification_tokens'] || '0', 10);
+      const responseTokens = parseInt(stats['response_tokens'] || '0', 10);
+      const cacheReadTokens = parseInt(stats['cache_read_tokens'] || '0', 10);
+      const cacheWriteTokens = parseInt(stats['cache_write_tokens'] || '0', 10);
+      const totalLatency = parseInt(stats['total_latency'] || '0', 10);
+      // TTS metrics (Phase 5)
+      const voiceSynthesisCount = parseInt(stats['voice_synthesis_count'] || '0', 10);
+      const voiceSynthesisBytes = parseInt(stats['voice_synthesis_bytes'] || '0', 10);
+      const voiceSynthesisLatency = parseInt(stats['voice_synthesis_latency'] || '0', 10);
 
       // Calculate derived metrics
       const tokensUsed = classificationTokens + responseTokens;
@@ -150,6 +182,9 @@ class MetricsCollector {
         : 0;
       const avgResponseTime = messagesReceived > 0
         ? totalLatency / messagesReceived
+        : 0;
+      const avgVoiceSynthesisLatency = voiceSynthesisCount > 0
+        ? voiceSynthesisLatency / voiceSynthesisCount
         : 0;
 
       // Get active pauses count
@@ -173,6 +208,10 @@ class MetricsCollector {
         uptime,
         activePauses,
         deferredMessages,
+        // TTS metrics (Phase 5)
+        voiceSynthesisCount,
+        voiceSynthesisBytes,
+        avgVoiceSynthesisLatency,
       };
 
       // Cache for 10 seconds
@@ -194,6 +233,9 @@ class MetricsCollector {
         uptime: Math.floor((now - startTime) / 1000),
         activePauses: 0,
         deferredMessages: 0,
+        voiceSynthesisCount: 0,
+        voiceSynthesisBytes: 0,
+        avgVoiceSynthesisLatency: 0,
       };
     }
   }
@@ -222,17 +264,17 @@ class MetricsCollector {
 
     const current = new Date(startDate);
     while (current <= endDate) {
-      const dateKey = current.toISOString().split('T')[0];
+      const dateKey = current.toISOString().split('T')[0] ?? '';
       const stats = await redisClient.client.hgetall(`STATS:tokens:${dateKey}`);
 
       if (Object.keys(stats).length > 0) {
         results.push({
           date: dateKey,
           metrics: {
-            messagesReceived: parseInt(stats.messages_received || '0', 10),
-            messagesSent: parseInt(stats.messages_sent || '0', 10),
-            tokensUsed: parseInt(stats.classification_tokens || '0', 10) +
-                        parseInt(stats.response_tokens || '0', 10),
+            messagesReceived: parseInt(stats['messages_received'] || '0', 10),
+            messagesSent: parseInt(stats['messages_sent'] || '0', 10),
+            tokensUsed: parseInt(stats['classification_tokens'] || '0', 10) +
+                        parseInt(stats['response_tokens'] || '0', 10),
           },
         });
       }

@@ -4,7 +4,8 @@
  */
 
 import pkg from 'whatsapp-web.js';
-const { Client: _Client } = pkg;
+const { Client } = pkg;
+type ClientType = InstanceType<typeof Client>;
 
 export interface FetchedMessage {
   id: string;
@@ -34,7 +35,7 @@ export class WhatsAppDisconnectedError extends Error {
  * @throws WhatsAppDisconnectedError if the browser frame is detached
  */
 export async function fetchChatMessages(
-  client: InstanceType<typeof Client>,
+  client: ClientType,
   contactId: string,
   limit: number = 50
 ): Promise<FetchedMessage[]> {
@@ -46,7 +47,7 @@ export async function fetchChatMessages(
     const messages = await chat.fetchMessages({ limit });
 
     // Map to our message format
-    return messages.map((msg) => ({
+    return messages.map((msg: { id: { _serialized: string }; body: string; timestamp: number; fromMe: boolean; hasMedia: boolean }) => ({
       id: msg.id._serialized,
       content: msg.body,
       timestamp: msg.timestamp * 1000, // Convert to milliseconds

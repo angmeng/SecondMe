@@ -233,7 +233,7 @@ export class SessionManager {
       createdAt: Date.now(),
       lastVerifiedAt: Date.now(),
       estimatedExpiryAt: Date.now() + SESSION_DURATION_MS,
-      state: 'CONNECTED',
+      state: WAState.CONNECTED,
       needsRefresh: false,
     };
 
@@ -337,10 +337,10 @@ export class SessionManager {
 
     // If sessionInfo is not set yet or has unknown state, check client.info as fallback
     // This handles the race condition where getStatus is called before initialize() completes
-    let state = this.sessionInfo?.state || 'unknown';
+    let state: WAState | 'unknown' = this.sessionInfo?.state || 'unknown';
     if (state === 'unknown' && this.client.info) {
       // Client is connected but sessionInfo hasn't been updated yet
-      state = 'CONNECTED';
+      state = WAState.CONNECTED;
     }
 
     return {

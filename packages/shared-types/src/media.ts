@@ -129,3 +129,38 @@ export const DEFAULT_MEDIA_LIMITS = {
   /** Supported image MIME types for vision */
   supportedImageTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const,
 };
+
+/**
+ * Result from voice synthesis (ElevenLabs TTS API)
+ */
+export interface SynthesisResult {
+  /** Base64-encoded audio data */
+  base64: string;
+  /** MIME type of the audio (e.g., 'audio/mpeg') */
+  mimeType: string;
+  /** Size of audio in bytes */
+  sizeBytes: number;
+  /** Duration of audio in milliseconds (if available) */
+  durationMs?: number;
+}
+
+/**
+ * Configuration for voice synthesis
+ */
+export interface SynthesisConfig {
+  /** Whether voice synthesis is enabled */
+  enabled: boolean;
+  /** Maximum characters to synthesize (cost control) */
+  maxCharacters: number;
+  /** Timeout for synthesis API call in milliseconds */
+  timeoutMs: number;
+}
+
+/**
+ * Default voice synthesis configuration
+ */
+export const DEFAULT_SYNTHESIS_CONFIG: SynthesisConfig = {
+  enabled: true,
+  maxCharacters: 500,
+  timeoutMs: 30000,
+};
