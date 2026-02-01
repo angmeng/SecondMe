@@ -16,7 +16,8 @@ SecondMe is a **Context-Adaptive WhatsApp Bot** that acts as a personal AI clone
 ```
 SecondMe/
 ├── packages/
-│   └── shared-types/        # Shared TypeScript types (@secondme/shared-types)
+│   ├── shared-types/        # Shared TypeScript types (@secondme/shared-types)
+│   └── cli/                 # Developer CLI tools (@secondme/cli)
 ├── frontend/                # Next.js 16.1.1 Dashboard
 │   └── src/
 │       ├── app/             # App Router pages & API routes
@@ -53,6 +54,11 @@ SecondMe/
 npm run dev              # Start all services concurrently
 npm run build            # Build all workspaces
 npm run type-check       # TypeScript validation
+
+# CLI Tools (Phase 6)
+npm run cli doctor       # Comprehensive health check
+npm run cli status       # Quick status overview
+npm run cli onboard      # Interactive setup wizard
 
 # Testing
 npm run test             # Unit tests (Vitest)
@@ -98,6 +104,16 @@ WhatsApp/Telegram ← Gateway ← QUEUE:responses ← Orchestrator ←
 - **Types**: Strict TypeScript, avoid `any`
 - **Async**: Always handle promise rejections
 - **Logging**: Use structured logger from `src/utils/logger.ts`
+
+### Code Quality Rules (Phase 6)
+
+| Rule | Threshold | Level |
+|------|-----------|-------|
+| `max-lines` | 700 lines | Error |
+| `complexity` | 15 per function | Warning |
+| `max-depth` | 4 levels | Warning |
+| `max-nested-callbacks` | 3 | Warning |
+| Coverage (lines/functions/branches) | 70% | Enforced |
 
 ## Critical Patterns
 
@@ -232,6 +248,34 @@ PUT    /skills/:skillId/config  # Update skill configuration
 
 Set `USE_SKILL_SYSTEM=true` in `.env` to enable. When disabled, falls back to legacy `graphAndPersonaNode` function.
 
+## Developer CLI
+
+The `@secondme/cli` package provides tools for setup, diagnostics, and management.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run cli doctor` | Comprehensive health check with actionable fix suggestions |
+| `npm run cli status` | Quick overview of service and connection status |
+| `npm run cli onboard` | Interactive setup wizard for new installations |
+
+### Doctor Health Checks
+
+| Category | Checks |
+|----------|--------|
+| Prerequisites | Node.js ≥24, npm, Docker, Docker Compose, Git |
+| Infrastructure | Redis, FalkorDB (TCP connectivity) |
+| Services | Gateway, Orchestrator, Graph Worker, Frontend (HTTP health) |
+| External | AutoMem, WhatsApp session, Telegram |
+| API Keys | Anthropic (required), OpenAI, Voyage, ElevenLabs |
+
+### Exit Codes
+
+- `doctor`: 0 = healthy, 1 = issues found
+- `status`: 0 = all running, 1 = some stopped
+- `onboard`: 0 = success, 1 = failed/cancelled
+
 ## Testing Strategy
 
 - **Unit**: Vitest for isolated function testing
@@ -246,3 +290,155 @@ The bot includes constitutional guardrails (see `specs/001-personal-ai-clone/`):
 - Auto-pause on user message (60 min)
 - Rate limiting (10 msgs/min → auto-pause)
 - Sleep hours enforcement
+
+## Security Guidelines
+
+### Secret Management
+- **Never commit** `.env`, credentials, or API keys
+- Store secrets in `.env` (gitignored) or environment variables
+- Use `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` naming convention
+- Rotate keys if accidentally exposed; revoke immediately
+
+### API Security
+| Endpoint Type | Protection |
+|---------------|------------|
+| Dashboard APIs (`/api/*`) | Internal only (no auth required locally) |
+| Service health (`/health`) | Public, read-only |
+| Redis Streams | Internal network only |
+| FalkorDB | Password-protected (`FALKORDB_PASSWORD`) |
+
+### Input Validation
+- Sanitize all user input before graph queries (Cypher injection risk)
+- Validate `contactId` format before Redis operations
+- Limit message size at Gateway level (`MAX_QUEUE_PAYLOAD_MB`)
+
+### Rate Limiting
+```typescript
+// Per-contact rate limiting (Gateway)
+const count = await redis.incr(`RATE:${contactId}`);
+await redis.expire(`RATE:${contactId}`, 60);
+if (count > 10) { /* pause contact */ }
+```
+
+## Debugging
+
+### Log Locations
+| Service | Log Output | Debug Flag |
+|---------|------------|------------|
+| Gateway | stdout/stderr | `DEBUG=gateway:*` |
+| Orchestrator | stdout/stderr | `DEBUG=orchestrator:*` |
+| Graph Worker | stdout/stderr | `DEBUG=graph-worker:*` |
+| All services | `docker compose logs -f` | - |
+
+### Common Debug Commands
+```bash
+# Watch all service logs
+docker compose logs -f
+
+# Check Redis state
+docker exec secondme-redis redis-cli -p 6379
+# Then: KEYS PAUSE:*
+# Then: XLEN QUEUE:messages
+
+# Check FalkorDB
+docker exec secondme-falkordb redis-cli
+# Then: GRAPH.QUERY secondme "MATCH (n) RETURN labels(n), count(n)"
+
+# Test service connectivity
+curl http://localhost:3001/health
+curl http://localhost:3002/health
+curl http://localhost:3003/health
+```
+
+### State Inspection
+```bash
+# Check paused contacts
+docker exec secondme-redis redis-cli -p 6379 KEYS "PAUSE:*"
+
+# View pending messages in queue
+docker exec secondme-redis redis-cli -p 6379 XLEN QUEUE:messages
+
+# Check skill status
+curl http://localhost:3002/skills | jq
+
+# View contact linking
+docker exec secondme-redis redis-cli -p 6379 KEYS "LINKED:*"
+```
+
+### Workflow Tracing
+Enable verbose logging in Orchestrator:
+```bash
+LOG_LEVEL=debug npm run dev -w services/orchestrator
+```
+
+## Schema & Migration Guidelines
+
+### FalkorDB Schema Changes
+1. **Additive changes** (new properties, nodes, relationships): Safe to deploy
+2. **Breaking changes** (rename, remove): Requires migration script
+3. **Index changes**: Run via `infra/falkordb/init-schema.cypher`
+
+### Migration Pattern
+```cypher
+-- Example: Add new property with default
+MATCH (c:Contact) WHERE c.newField IS NULL
+SET c.newField = 'default_value'
+RETURN count(c) AS updated;
+```
+
+### Redis Key Changes
+- **Adding keys**: No migration needed
+- **Renaming keys**: Use `RENAME` or dual-write during transition
+- **Changing TTL**: Update in code, existing keys expire naturally
+- **Removing keys**: Clean up with `SCAN` + `DEL` pattern
+
+## Performance Considerations
+
+### Token Optimization
+- Use prompt caching for system prompts (`cache_control: { type: 'ephemeral' }`)
+- Haiku for classification, Sonnet for generation
+- Monitor `tokens_used_total` metric
+
+### Caching Strategy
+| Data | Cache Location | TTL | Invalidation |
+|------|---------------|-----|--------------|
+| Personas | Redis (`PERSONA:{id}`) | 30 min | Manual on update |
+| Embeddings | Redis (`EMB:*`) | 5 min | Hash-based key |
+| History | In-memory LRU | Session | On disconnect |
+| Graph context | None | - | Real-time query |
+
+### Batch Operations
+```typescript
+// Prefer batch embedding over single calls
+const results = await provider.embedBatch(['text1', 'text2', 'text3']);
+
+// Use Redis pipeline for multiple operations
+const pipeline = redis.pipeline();
+pipeline.get(`PAUSE:${contactId}`);
+pipeline.get(`RATE:${contactId}`);
+const results = await pipeline.exec();
+```
+
+## Contributing
+
+### Branch Naming
+- `feature/description` - New features
+- `fix/description` - Bug fixes
+- `refactor/description` - Code improvements
+- `docs/description` - Documentation updates
+
+### Commit Messages
+```
+type(scope): description
+
+feat(gateway): add Telegram channel support
+fix(orchestrator): handle empty graph context
+refactor(frontend): extract ContactCard component
+docs(claude): add security guidelines
+```
+
+### PR Checklist
+- [ ] Tests pass (`npm run test`)
+- [ ] Types check (`npm run type-check`)
+- [ ] Lint clean (`npm run lint`)
+- [ ] CLAUDE.md updated if architecture changed
