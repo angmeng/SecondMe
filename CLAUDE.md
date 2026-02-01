@@ -134,6 +134,11 @@ WhatsApp/Telegram ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `EMB:{provider}:{hash}` - Cached embeddings (5-min TTL)
 - `EMB:voyage:{type}:{hash}` - Voyage embeddings with input type (5-min TTL)
 - `INDEXED:conversation:{chunkId}` - Indexed conversation chunk marker (no TTL)
+- `DOCS:metadata:{documentId}` - Uploaded document metadata JSON (no TTL)
+- `DOCS:list` - Sorted set of document IDs by upload time (no TTL)
+- `DOCS:category:{category}` - Set of document IDs per category (no TTL)
+- `DOCS:status:{status}` - Set of document IDs per status (no TTL)
+- `QUEUE:documents` - Redis stream for document processing queue
 
 ### Environment Variables
 Required in `.env`:
@@ -164,6 +169,11 @@ Optional for enhanced RAG (Phase 5):
 - `CONVERSATION_INDEXING_ENABLED` - Auto-index conversations (default: `false`)
 - `RETRIEVAL_FUSION_ENABLED` - Multi-source retrieval fusion (default: `false`)
 - `SEMANTIC_RAG_ENABLED` - Enable semantic RAG with AutoMem (default: `false`)
+
+Optional for document upload (Personal Knowledge):
+- `DOCUMENT_UPLOAD_ENABLED` - Enable document upload feature (default: `true`)
+- `DOCUMENT_MAX_SIZE_MB` - Maximum file size in MB (default: `10`)
+- `FACT_EXTRACTION_CONCURRENCY` - Parallel Haiku calls for fact extraction (default: `3`)
 
 ## Environment Setup
 
@@ -242,6 +252,7 @@ The orchestrator uses a skill-based architecture for context retrieval. Skills a
 | `persona` | Gets persona style guide based on relationship type |
 | `style-profile` | Retrieves communication style profile |
 | `conversation-history` | Gets recent conversation with keyword chunking |
+| `owner-knowledge` | Retrieves owner's personal context from uploaded documents |
 
 ### Skill API (Orchestrator port 3002)
 
@@ -256,6 +267,53 @@ PUT    /skills/:skillId/config  # Update skill configuration
 ### Feature Flag
 
 Set `USE_SKILL_SYSTEM=true` in `.env` to enable. When disabled, falls back to legacy `graphAndPersonaNode` function.
+
+## Personal Knowledge Upload
+
+Upload personal documents (resume, bio, expertise notes) to give your AI clone knowledge about you. When contacts ask "What do you do?" or "Tell me about yourself", the bot references this information.
+
+### Supported Document Types
+
+| Type | MIME Type |
+|------|-----------|
+| PDF | `application/pdf` |
+| Word (DOCX) | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
+| Plain Text | `text/plain` |
+| Markdown | `text/markdown` |
+| HTML | `text/html` |
+
+### Document Categories
+
+- `professional` - Resume, CV, work history
+- `personal` - Bio, interests, background
+- `knowledge` - Domain expertise, technical knowledge
+- `notes` - General notes and references
+
+### Document API (Frontend port 3000)
+
+```
+POST   /api/documents          # Upload document (multipart/form-data)
+GET    /api/documents          # List all documents
+GET    /api/documents/:id      # Get document details
+DELETE /api/documents/:id      # Delete document and AutoMem chunks
+```
+
+### Processing Pipeline
+
+1. **Upload**: Frontend validates file type/size, encodes to base64, queues to `QUEUE:documents`
+2. **Parse**: Orchestrator extracts text (pdf-parse, mammoth for DOCX)
+3. **Chunk**: Split into ~600 token chunks with 50-token overlap
+4. **Extract**: Claude Haiku extracts facts (skills, experience, education, etc.)
+5. **Store**: Chunks stored in AutoMem with `owner:knowledge` tag
+6. **Retrieve**: `owner-knowledge` skill queries AutoMem during message processing
+
+### Dashboard
+
+Access the Knowledge page at `/knowledge` to:
+- Upload documents with drag-and-drop
+- View processing status (pending → processing → completed/failed)
+- See extracted chunk counts
+- Delete documents
 
 ## Developer CLI
 
@@ -401,6 +459,12 @@ curl http://localhost:3002/skills | jq
 
 # View contact linking
 docker exec secondme-redis redis-cli -p 6379 KEYS "LINKED:*"
+
+# View uploaded documents
+docker exec secondme-redis redis-cli -p 6379 ZRANGE DOCS:list 0 -1
+
+# Check document processing queue
+docker exec secondme-redis redis-cli -p 6379 XLEN QUEUE:documents
 ```
 
 ### Workflow Tracing
