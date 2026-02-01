@@ -694,6 +694,10 @@ export class TelegramChannel extends BaseChannel {
       );
     }
 
+    // Add jitter (±25%) to prevent thundering herd when multiple requests retry
+    const jitterFactor = 0.75 + Math.random() * 0.5; // 0.75 to 1.25
+    delay = Math.round(delay * jitterFactor);
+
     this.logger.warn(`Retrying Telegram ${operationType}`, {
       channelId: this.id,
       to,

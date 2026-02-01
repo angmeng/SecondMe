@@ -222,9 +222,18 @@ describe('TelegramChannel', () => {
         'Retrying Telegram sendMessage',
         expect.objectContaining({
           is429: true,
-          delayMs: 1000,
+          // delayMs has jitter (±25%), so we just check it exists
+          delayMs: expect.any(Number),
         })
       );
+
+      // Verify delay is within expected range (1000ms base ± 25% jitter = 750-1250ms)
+      const warnCall = mockDeps.logger.warn.mock.calls.find(
+        (call) => call[0] === 'Retrying Telegram sendMessage'
+      );
+      const actualDelay = warnCall?.[1]?.delayMs as number;
+      expect(actualDelay).toBeGreaterThanOrEqual(750);
+      expect(actualDelay).toBeLessThanOrEqual(1250);
     });
 
     it('retries on network errors', async () => {

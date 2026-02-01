@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
 import { getErrorMessage } from '@/lib/errors';
+import { createAuditLogger } from '@/lib/audit';
 import type { ContactTier } from '@secondme/shared-types';
 
 interface RouteParams {
@@ -17,6 +18,8 @@ interface RouteParams {
  * Update contact tier
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { contactId } = await params;
     const body = await request.json();
@@ -36,6 +39,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
     }
 
+    audit('UPDATE_CONTACT_TIER', 'pairing', contactId, { tier });
+
     return NextResponse.json({
       success: true,
       contact: updated,
@@ -50,11 +55,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
  * DELETE /api/pairing/approved/[contactId]
  * Revoke approval
  */
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { contactId } = await params;
 
     await redisClient.revokeApproval(contactId);
+
+    audit('REVOKE_APPROVAL', 'pairing', contactId);
 
     return NextResponse.json({
       success: true,

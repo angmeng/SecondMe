@@ -19,6 +19,21 @@ const PROTECTED_KEY_PREFIXES = [
   'SKILLS:',       // Skill configuration (could escalate privileges)
   'AUTH:',         // Authentication
   'SESSION:',      // Session data
+  'PAIRING:',      // Contact pairing data
+  'HISTORY:',      // Conversation history (privacy)
+  'LINKED:',       // Cross-channel contact linking
+  'PERSONA:',      // Persona data
+  'VOICE_PREF:',   // Voice preferences
+];
+
+/**
+ * Key prefixes that external skills are allowed to READ
+ * This is a whitelist approach for defense in depth
+ */
+const ALLOWED_READ_PREFIXES = [
+  'CACHE:',        // General cache (safe to read)
+  'EXT_SKILL:',    // External skill data
+  'EMB:',          // Embeddings cache (read-only useful)
 ];
 
 /**
@@ -55,9 +70,10 @@ export class RestrictedRedis {
 
   /**
    * Check if a key is allowed for the given operation
+   * Uses defense-in-depth: both blocklist (protected) and whitelist (allowed reads)
    */
   private isKeyAllowed(key: string, operation: 'read' | 'write'): boolean {
-    // Check for protected keys
+    // Check for protected keys (blocklist)
     for (const prefix of PROTECTED_KEY_PREFIXES) {
       if (key.startsWith(prefix)) {
         this.logger.warn(`Skill ${this.skillId} blocked from ${operation} on protected key: ${key}`);
@@ -65,10 +81,19 @@ export class RestrictedRedis {
       }
     }
 
-    // External skills can only access their namespaced keys for write operations
+    // External skills can only write to their namespaced keys
     if (operation === 'write' && !key.startsWith(this.namespace)) {
       this.logger.warn(`Skill ${this.skillId} blocked from writing to non-namespaced key: ${key}`);
       return false;
+    }
+
+    // External skills can only read from whitelisted prefixes (defense in depth)
+    if (operation === 'read') {
+      const isAllowed = ALLOWED_READ_PREFIXES.some((prefix) => key.startsWith(prefix));
+      if (!isAllowed) {
+        this.logger.warn(`Skill ${this.skillId} blocked from reading non-whitelisted key: ${key}`);
+        return false;
+      }
     }
 
     return true;
