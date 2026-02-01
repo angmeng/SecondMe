@@ -57,6 +57,11 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       'no-console': 'off', // Allow console for logging in backend services
+      // Code quality enforcement (Phase 6)
+      'max-lines': ['error', { max: 700, skipBlankLines: true, skipComments: true }],
+      complexity: ['warn', 15],
+      'max-depth': ['warn', 4],
+      'max-nested-callbacks': ['warn', 3],
     },
   },
 

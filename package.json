@@ -5,12 +5,14 @@
   "private": true,
   "workspaces": [
     "packages/shared-types",
+    "packages/cli",
     "services/gateway",
     "services/orchestrator",
     "services/graph-worker",
     "frontend"
   ],
   "scripts": {
+    "cli": "npm run dev -w @secondme/cli --",
     "dev": "concurrently \"npm run dev -w services/gateway\" \"npm run dev -w services/orchestrator\" \"npm run dev -w services/graph-worker\" \"npm run dev -w frontend\"",
     "build": "npm run build -w packages/shared-types && npm run build -w services/gateway && npm run build -w services/orchestrator && npm run build -w services/graph-worker && npm run build -w frontend",
     "test": "vitest run",
