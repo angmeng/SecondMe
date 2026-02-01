@@ -28,6 +28,7 @@ export { KnowledgeGraphSkill } from './built-in/knowledge-graph/index.js';
 export { PersonaSkill } from './built-in/persona/index.js';
 export { StyleProfileSkill } from './built-in/style-profile/index.js';
 export { ConversationHistorySkill } from './built-in/conversation-history/index.js';
+export { OwnerKnowledgeSkill } from './built-in/owner-knowledge/index.js';
 
 // Import skillRegistry for use in registerBuiltInSkills
 import { skillRegistry as registry } from './registry.js';
@@ -43,11 +44,13 @@ export async function registerBuiltInSkills(): Promise<void> {
   const { PersonaSkill } = await import('./built-in/persona/index.js');
   const { StyleProfileSkill } = await import('./built-in/style-profile/index.js');
   const { ConversationHistorySkill } = await import('./built-in/conversation-history/index.js');
+  const { OwnerKnowledgeSkill } = await import('./built-in/owner-knowledge/index.js');
 
   await registry.register(new KnowledgeGraphSkill());
   await registry.register(new PersonaSkill());
   await registry.register(new StyleProfileSkill());
   await registry.register(new ConversationHistorySkill());
+  await registry.register(new OwnerKnowledgeSkill());
 }
 
 /**

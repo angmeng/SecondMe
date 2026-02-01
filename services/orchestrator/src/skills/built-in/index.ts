@@ -14,3 +14,6 @@ export { styleProfileManifest } from './style-profile/manifest.js';
 
 export { ConversationHistorySkill } from './conversation-history/index.js';
 export { conversationHistoryManifest } from './conversation-history/manifest.js';
+
+export { OwnerKnowledgeSkill } from './owner-knowledge/index.js';
+export { ownerKnowledgeManifest } from './owner-knowledge/manifest.js';

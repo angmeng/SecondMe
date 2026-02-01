@@ -354,6 +354,10 @@ export async function graphAndPersonaNodeWithSkills(state: WorkflowState): Promi
     const styleProfileData = skillResults.find((r) => r.data?.['styleProfile'])?.data;
     const historyData = skillResults.find((r) => r.data?.['conversationHistory'])?.data;
 
+    // Owner knowledge uses the formatted context string (already formatted by skill)
+    const ownerKnowledgeResult = skillResults.find((r) => r.skillId === 'owner-knowledge');
+    const ownerKnowledgeContext = ownerKnowledgeResult?.context;
+
     const latency = Date.now() - startTime;
 
     // Log skill execution stats
@@ -383,6 +387,9 @@ export async function graphAndPersonaNodeWithSkills(state: WorkflowState): Promi
     }
     if (styleProfileData?.['styleProfile']) {
       result.styleProfile = styleProfileData['styleProfile'] as StyleProfile;
+    }
+    if (ownerKnowledgeContext) {
+      result.ownerKnowledgeContext = ownerKnowledgeContext;
     }
 
     return result;
