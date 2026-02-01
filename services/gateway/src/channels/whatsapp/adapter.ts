@@ -13,7 +13,8 @@
  */
 
 import type { Client as WWJSClient, Message as WWJSMessage } from 'whatsapp-web.js';
-import { MessageMedia } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { MessageMedia } = pkg;
 import { BaseChannel } from '../base-channel.js';
 import type {
   ChannelMessage,

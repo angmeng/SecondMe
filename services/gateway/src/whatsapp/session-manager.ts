@@ -6,7 +6,8 @@
  * if the phone goes offline or the session is manually invalidated.
  */
 
-import { Client, WAState } from 'whatsapp-web.js';
+import { Client } from 'whatsapp-web.js';
+import type { WAState } from 'whatsapp-web.js';
 import { io } from '../index.js';
 import { redisClient } from '../redis/client.js';
 
@@ -233,7 +234,7 @@ export class SessionManager {
       createdAt: Date.now(),
       lastVerifiedAt: Date.now(),
       estimatedExpiryAt: Date.now() + SESSION_DURATION_MS,
-      state: WAState.CONNECTED,
+      state: 'CONNECTED' as WAState,
       needsRefresh: false,
     };
 
@@ -340,7 +341,7 @@ export class SessionManager {
     let state: WAState | 'unknown' = this.sessionInfo?.state || 'unknown';
     if (state === 'unknown' && this.client.info) {
       // Client is connected but sessionInfo hasn't been updated yet
-      state = WAState.CONNECTED;
+      state = 'CONNECTED' as WAState;
     }
 
     return {
