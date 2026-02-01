@@ -11,7 +11,7 @@ This file provides guidance for Claude Code when working with the SecondMe proje
 
 ## Project Overview
 
-SecondMe is a **Context-Adaptive WhatsApp Bot** that acts as a personal AI clone. It uses Claude AI with knowledge graph memory for context-aware conversations.
+SecondMe is a **Context-Adaptive Multi-Channel Bot** that acts as a personal AI clone. It supports WhatsApp and Telegram, using Claude AI with knowledge graph memory for context-aware conversations.
 
 ```
 SecondMe/
@@ -24,7 +24,7 @@ SecondMe/
 │       ├── components/      # React 19.2 components
 │       └── lib/             # Utilities (socket, redis)
 ├── services/
-│   ├── gateway/             # WhatsApp Web.js integration (port 3001)
+│   ├── gateway/             # Multi-channel messaging (WhatsApp/Telegram, port 3001)
 │   ├── orchestrator/        # LangGraph AI workflow (port 3002)
 │   └── graph-worker/        # Knowledge graph ingestion (port 3003)
 ├── specs/                   # Project specifications & contracts
@@ -141,6 +141,14 @@ Required in `.env`:
 - `FALKORDB_PASSWORD` - Graph database auth
 - `NODE_ENV` - development/production
 - `USE_SKILL_SYSTEM` - Enable skill-based context retrieval (`true` to enable)
+
+Optional for Telegram channel:
+- `TELEGRAM_ENABLED` - Enable Telegram channel (`true` to enable)
+- `TELEGRAM_BOT_TOKEN` - Telegram Bot API token from @BotFather
+
+Optional for voice output (TTS):
+- `ELEVENLABS_API_KEY` - ElevenLabs API key for text-to-speech
+- `VOICE_OUTPUT_ENABLED` - Enable voice message responses (`true` to enable)
 
 Optional for media processing (Phase 4):
 - `OPENAI_API_KEY` - Required for voice transcription (Whisper API)
