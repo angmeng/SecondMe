@@ -6,12 +6,14 @@
  * Optimized for RAG applications.
  */
 
+import { createHash } from 'crypto';
 import {
   EmbeddingProvider,
   type EmbeddingProviderConfig,
   type EmbeddingResult,
   type BatchEmbeddingResult,
 } from './provider.js';
+import { redisClient } from '../redis/client.js';
 
 const VOYAGE_API_KEY = process.env['VOYAGE_API_KEY'];
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
@@ -72,63 +74,103 @@ export class VoyageEmbeddings extends EmbeddingProvider {
   }
 
   /**
-   * Embed a single text using Voyage API
+   * Embed a single text using Voyage API (called by parent's embed() which handles caching)
    */
   protected async embedSingle(text: string): Promise<EmbeddingResult> {
-    return this.embedWithType(text, this.defaultInputType);
+    // Parent's embed() already handles caching, so we just call the API directly
+    return this.callVoyageApi(text, this.defaultInputType);
   }
 
   /**
-   * Embed with specific input type
+   * Internal API call without caching (used by embedSingle and embedWithType)
    */
-  async embedWithType(text: string, inputType: VoyageInputType): Promise<EmbeddingResult> {
-    // Skip cache check for type-specific embedding (handled in parent)
-    if (!this.checkCircuitBreaker()) {
-      throw new Error('Voyage API circuit breaker is open');
-    }
-
+  private async callVoyageApi(text: string, inputType: VoyageInputType): Promise<EmbeddingResult> {
     if (!this.apiKey) {
       throw new Error('VOYAGE_API_KEY not configured');
     }
 
     const startTime = Date.now();
 
+    const response = await fetch(VOYAGE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model,
+        input: [text],
+        input_type: inputType,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Voyage API error ${response.status}: ${errorText}`);
+    }
+
+    const data = (await response.json()) as VoyageEmbeddingResponse;
+    const embedding = data.data[0]?.embedding;
+
+    if (!embedding) {
+      throw new Error('No embedding returned from Voyage API');
+    }
+
+    const latency = Date.now() - startTime;
+    console.log(`[Voyage] Embedding generated in ${latency}ms (${data.usage.total_tokens} tokens)`);
+
+    return {
+      embedding,
+      fromCache: false,
+      tokensUsed: data.usage.total_tokens,
+    };
+  }
+
+  /**
+   * Generate type-aware cache key for Voyage embeddings
+   * Different input types produce different embeddings, so we include it in the key
+   */
+  private getTypedCacheKey(text: string, inputType: VoyageInputType): string {
+    const hash = createHash('sha256').update(text).digest('hex').substring(0, 16);
+    return `EMB:voyage:${inputType}:${hash}`;
+  }
+
+  /**
+   * Embed with specific input type (with type-aware caching)
+   * Use this method when you need to specify query vs document input type
+   */
+  async embedWithType(text: string, inputType: VoyageInputType): Promise<EmbeddingResult> {
+    // Check cache first with type-aware key
+    const cacheKey = this.getTypedCacheKey(text, inputType);
+
     try {
-      const response = await fetch(VOYAGE_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.model,
-          input: [text],
-          input_type: inputType,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Voyage API error ${response.status}: ${errorText}`);
+      const cached = await redisClient.client.get(cacheKey);
+      if (cached) {
+        console.log(`[Voyage] Cache hit for ${inputType} embedding`);
+        return {
+          embedding: JSON.parse(cached),
+          fromCache: true,
+          tokensUsed: 0,
+        };
       }
+    } catch (error) {
+      console.warn('[Voyage] Cache read error:', error);
+    }
 
-      const data = (await response.json()) as VoyageEmbeddingResponse;
-      const embedding = data.data[0]?.embedding;
+    // Check circuit breaker
+    if (!this.checkCircuitBreaker()) {
+      throw new Error('Voyage API circuit breaker is open');
+    }
 
-      if (!embedding) {
-        throw new Error('No embedding returned from Voyage API');
-      }
-
-      const latency = Date.now() - startTime;
-      console.log(`[Voyage] Embedding generated in ${latency}ms (${data.usage.total_tokens} tokens)`);
+    try {
+      const result = await this.callVoyageApi(text, inputType);
 
       this.recordSuccess();
 
-      return {
-        embedding,
-        fromCache: false,
-        tokensUsed: data.usage.total_tokens,
-      };
+      // Cache the embedding with type-aware key
+      await this.cacheEmbedding(cacheKey, result.embedding);
+
+      return result;
     } catch (error) {
       this.recordFailure();
       throw error;
