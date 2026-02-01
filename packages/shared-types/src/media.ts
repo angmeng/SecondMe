@@ -164,3 +164,37 @@ export const DEFAULT_SYNTHESIS_CONFIG: SynthesisConfig = {
   maxCharacters: 500,
   timeoutMs: 30000,
 };
+
+/**
+ * Per-contact voice preference for TTS output
+ * Stored in Redis cache and AutoMem contact metadata
+ */
+export interface VoicePreference {
+  /** Whether voice output is enabled for this contact */
+  enabled: boolean;
+  /** ElevenLabs voice ID (optional - uses default if not set) */
+  voiceId?: string;
+  /** TTS model ID (e.g., 'eleven_multilingual_v2') */
+  modelId?: string;
+  /** Maximum characters to synthesize for this contact (cost control) */
+  maxCharacters?: number;
+}
+
+/**
+ * Cached voice preference with metadata
+ */
+export interface CachedVoicePreference extends VoicePreference {
+  /** Contact ID this preference belongs to */
+  contactId: string;
+  /** When this preference was cached */
+  cachedAt: number;
+}
+
+/**
+ * Type guard for VoicePreference
+ */
+export function isVoicePreference(obj: unknown): obj is VoicePreference {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const pref = obj as Record<string, unknown>;
+  return typeof pref['enabled'] === 'boolean';
+}

@@ -334,6 +334,47 @@ PUT    /skills/:skillId/config  # Update config
 2. Implement `execute()` to return `SkillExecutionResult`
 3. Register in `skills/index.ts` via `registerBuiltInSkills()`
 
+**External Skill Loading:**
+
+External skills can be loaded from a directory structure. Enable with `LOAD_EXTERNAL_SKILLS=true`.
+
+**Key Files:**
+| File | Responsibility |
+|------|----------------|
+| `skills/loader.ts` | Load skills from directory, validate manifests |
+| `skills/validator.ts` | Manifest validation, permission checking |
+| `skills/security.ts` | RestrictedRedis for permission-based access |
+
+**Directory Structure:**
+```
+/path/to/skills/
+├── my-skill/
+│   └── index.js     # Default export: skill class constructor
+├── another-skill/
+│   └── index.js
+```
+
+**Security Model:**
+- External skills use `RestrictedRedis` proxy for filtered Redis access
+- Protected key prefixes (blocked): `PAUSE:`, `RATE:`, `QUEUE:`, `SKILLS:`, `AUTH:`, `SESSION:`
+- Write access limited to namespaced keys: `EXT_SKILL:{skillId}:*`
+- Read access allowed for non-protected keys
+
+**Permissions:**
+| Permission | Description |
+|------------|-------------|
+| `redis:read` | Read from non-protected Redis keys |
+| `redis:write` | Write to skill-namespaced keys only |
+| `automem:read` | Read from AutoMem memory store |
+| `automem:write` | Write to AutoMem memory store |
+| `network` | Make outbound HTTP requests |
+
+**Manifest Validation:**
+- Reserved IDs blocked: `knowledge-graph`, `persona`, `style-profile`, `conversation-history`
+- ID format: lowercase alphanumeric with hyphens
+- Valid permissions only
+- Config field type validation (string, number, boolean)
+
 ### Media Processing (Phase 4)
 
 The orchestrator processes voice messages and images via the media pipeline.

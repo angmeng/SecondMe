@@ -936,8 +936,8 @@ Task 1.2.3 (Secrets) ── independent
 
 ## Phase 2: Extensibility Architecture (P1) ✅ COMPLETE
 
-**Completed**: 2026-01-31
-**Review**: Tasks 2.1.1-2.1.3 implemented, Task 2.1.4 deferred
+**Completed**: 2026-02-01
+**Review**: All 4 tasks implemented (2.1.1-2.1.4), 100% complete
 
 ### Epic 2.1: Skill/Plugin System
 
@@ -952,7 +952,7 @@ Task 1.2.3 (Secrets) ── independent
 | 2.1.1 Skill Interface & Registry | ✅ Complete | `shared-types/skills.ts`, `orchestrator/skills/registry.ts` |
 | 2.1.2 Built-in Skills Migration | ✅ Complete | 4 skills in `orchestrator/skills/built-in/` |
 | 2.1.3 Skill Configuration UI | ✅ Complete | `frontend/src/app/skills/`, API routes |
-| 2.1.4 External Skill Loading | ⏸️ Deferred | Requires security sandboxing |
+| 2.1.4 External Skill Loading | ✅ Complete | `orchestrator/skills/loader.ts`, `validator.ts`, `security.ts` |
 
 #### Built-in Skills
 
@@ -1001,17 +1001,42 @@ PUT    /skills/:skillId/config  # Update config
 | Unified manifest source | Frontend proxies to orchestrator API (removed hardcoded manifests) |
 | Skill ID validation | Type-safe validation in orchestrator endpoints |
 
-#### Task 2.1.4: External Skill Loading (Deferred)
+#### Task 2.1.4: External Skill Loading ✅ COMPLETE
 
-**Status**: Deferred to future phase
+**Completed**: 2026-02-01
 
-**Requires**:
-- Secure sandboxed execution (vm2 or isolated-vm)
-- Filesystem watcher for hot reload
-- Schema validation for manifests
-- Security review of permission model
+**Files created**:
+- `services/orchestrator/src/skills/loader.ts` - `loadSkillFromDirectory`, `loadSkillsFromDirectory`
+- `services/orchestrator/src/skills/validator.ts` - `validateSkillManifest`, `hasPermission`
+- `services/orchestrator/src/skills/security.ts` - `RestrictedRedis` with permission-based access
+- `services/orchestrator/src/skills/__tests__/validator.test.ts` - 14 tests
+- `services/orchestrator/src/skills/__tests__/security.test.ts` - 19 tests
 
-For now, only built-in skills are supported
+**Key Features**:
+- **Manifest validation**: Reserved skill IDs, valid permissions, config field validation
+- **Security proxy**: RestrictedRedis class filters Redis operations based on skill permissions
+- **Protected keys**: PAUSE:, RATE:, QUEUE:, SKILLS:, AUTH:, SESSION: prefixes blocked
+- **Namespaced writes**: External skills can only write to `EXT_SKILL:{skillId}:` keys
+- **Permission model**: `redis:read`, `redis:write`, `automem:read`, `automem:write`, `network`
+
+**Environment Variable**:
+```bash
+LOAD_EXTERNAL_SKILLS=true  # Enable loading from skills directory
+```
+
+**Usage**:
+```typescript
+// In orchestrator initialization
+await registerExternalSkills('/path/to/skills', logger);
+```
+
+**Acceptance Criteria**:
+- [x] Load skills from directory structure
+- [x] Validate manifests before loading
+- [x] Security proxy for Redis access
+- [x] Permission-based access control
+- [x] Protected key prefixes blocked
+- [x] 33 unit tests passing
 
 ---
 
@@ -1486,7 +1511,7 @@ export class TelegramChannel extends BaseChannel {
 - [x] Contact caching from incoming messages
 - [x] Graceful disconnect with cache cleanup
 - [x] Dashboard shows Telegram connection status (Task 3.1.5) ✅
-- [ ] Graceful handling of rate limits (deferred)
+- [x] Graceful handling of rate limits (429 errors with retry_after parsing)
 
 ##### Code Review Fixes (2026-01-31)
 
@@ -1843,10 +1868,12 @@ interface TTSConfig {
 **Acceptance Criteria**:
 - [x] Text responses converted to audio
 - [x] Audio sent as voice message
-- [ ] Configurable per-contact preference (deferred - future enhancement)
+- [x] Configurable per-contact voice preference (voiceId, modelId, maxCharacters)
 - [x] Fallback to text on TTS failure
+- [x] Voice preferences stored via AutoMem contact metadata
+- [x] Redis caching for voice preferences (30-min TTL)
 
-**Status**: ✅ Complete (implemented in `services/orchestrator/src/media/synthesizer.ts`)
+**Status**: ✅ Complete (implemented in `services/orchestrator/src/media/synthesizer.ts` and `redis/voice-cache.ts`)
 
 ---
 

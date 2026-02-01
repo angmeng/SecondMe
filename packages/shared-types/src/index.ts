@@ -103,6 +103,9 @@ export type {
   ImageProcessingConfig,
   SynthesisResult,
   SynthesisConfig,
+  // Task 4.1.2: Per-contact voice preferences
+  VoicePreference,
+  CachedVoicePreference,
 } from './media.js';
 
 export {
@@ -110,4 +113,6 @@ export {
   DEFAULT_IMAGE_CONFIG,
   DEFAULT_MEDIA_LIMITS,
   DEFAULT_SYNTHESIS_CONFIG,
+  // Task 4.1.2: Voice preference guard
+  isVoicePreference,
 } from './media.js';

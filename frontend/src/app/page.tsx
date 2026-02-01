@@ -25,19 +25,26 @@ interface RecentActivity {
 }
 
 export default function HomePage() {
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
-    () => socketClient.getLastConnectionStatus()
-  );
+  // Use 'disconnected' as initial state for SSR to avoid hydration mismatch
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
-  const [isSocketConnected, setIsSocketConnected] = useState(() => socketClient.getSocket().connected);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'messages' | 'pauses'>('all');
+  const [hasMounted, setHasMounted] = useState(false);
 
   const addActivity = useCallback((activity: RecentActivity) => {
     setRecentActivity((prev) => [activity, ...prev].slice(0, 20));
   }, []);
 
   useEffect(() => {
+    // Mark as mounted to enable client-only rendering for socket-dependent UI
+    setHasMounted(true);
+
     const socket = socketClient.getSocket();
+
+    // Initialize actual socket state after mount (avoids hydration mismatch)
+    setIsSocketConnected(socket.connected);
+    setConnectionStatus(socketClient.getLastConnectionStatus());
 
     // Keep isSocketConnected in sync with actual socket state
     const handleSocketConnect = () => {
@@ -233,26 +240,32 @@ export default function HomePage() {
                 </p>
                 <p
                   className={`mt-1 text-xl font-semibold ${
-                    isSocketConnected
-                      ? 'text-success-600 dark:text-success-400'
-                      : 'text-error-600 dark:text-error-400'
+                    !hasMounted
+                      ? 'text-slate-400 dark:text-slate-500'
+                      : isSocketConnected
+                        ? 'text-success-600 dark:text-success-400'
+                        : 'text-error-600 dark:text-error-400'
                   }`}
                 >
-                  {isSocketConnected ? 'Connected' : 'Disconnected'}
+                  {!hasMounted ? 'Loading...' : isSocketConnected ? 'Connected' : 'Disconnected'}
                 </p>
               </div>
               <div
                 className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                  isSocketConnected
-                    ? 'bg-success-100 dark:bg-success-900/30'
-                    : 'bg-error-100 dark:bg-error-900/30'
+                  !hasMounted
+                    ? 'bg-slate-100 dark:bg-slate-800'
+                    : isSocketConnected
+                      ? 'bg-success-100 dark:bg-success-900/30'
+                      : 'bg-error-100 dark:bg-error-900/30'
                 }`}
               >
                 <svg
                   className={`h-6 w-6 ${
-                    isSocketConnected
-                      ? 'text-success-600 dark:text-success-400'
-                      : 'text-error-600 dark:text-error-400'
+                    !hasMounted
+                      ? 'text-slate-400 dark:text-slate-500'
+                      : isSocketConnected
+                        ? 'text-success-600 dark:text-success-400'
+                        : 'text-error-600 dark:text-error-400'
                   }`}
                   fill="none"
                   stroke="currentColor"

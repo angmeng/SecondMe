@@ -22,7 +22,11 @@ import {
 import { RelationshipSignal } from './relationship-signals.js';
 import { getVoiceTranscriber, getVoiceSynthesizer } from '../media/index.js';
 import { metricsCollector } from '../metrics/collector.js';
-import type { ImageContent, MediaType } from '@secondme/shared-types';
+import type { ImageContent, MediaType, VoicePreference } from '@secondme/shared-types';
+import {
+  getVoicePreferenceWithCache,
+  getDefaultVoicePreference,
+} from '../redis/voice-cache.js';
 
 /**
  * Message classification type
@@ -493,8 +497,23 @@ async function calculateEnhancedTypingDelay(
 }
 
 /**
+ * Get voice preference for a contact
+ * Uses cache-first pattern with fallback to default settings
+ */
+async function getContactVoicePreference(contactId: string): Promise<VoicePreference> {
+  const preference = await getVoicePreferenceWithCache(contactId, async () => {
+    // In future, this could load from AutoMem contact metadata
+    // For now, return null to use default
+    return null;
+  });
+
+  return preference || getDefaultVoicePreference();
+}
+
+/**
  * Synthesize voice response using ElevenLabs TTS
  * Phase 5: Only synthesizes when incoming message was a voice message
+ * Task 4.1.2: Supports per-contact voice preferences
  */
 async function voiceSynthesisNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   // Skip if no response or synthesis not needed
@@ -502,19 +521,41 @@ async function voiceSynthesisNode(state: WorkflowState): Promise<Partial<Workflo
     return {};
   }
 
+  // Get per-contact voice preference
+  const voicePreference = await getContactVoicePreference(state.contactId);
+
+  // Check if voice output is disabled for this contact
+  if (!voicePreference.enabled) {
+    console.log(`[Workflow] Voice output disabled for contact ${state.contactId}, skipping`);
+    return {};
+  }
+
   const synthesizer = getVoiceSynthesizer();
   if (!synthesizer.isEnabled()) {
-    console.log('[Workflow] Voice synthesis disabled, skipping');
+    console.log('[Workflow] Voice synthesis disabled globally, skipping');
     return {};
   }
 
   const startTime = Date.now();
 
   try {
-    const result = await synthesizer.synthesize(state.response);
+    // Build options object with only defined values (for exactOptionalPropertyTypes)
+    const options: {
+      voiceId?: string;
+      modelId?: string;
+      maxCharacters?: number;
+    } = {};
+    if (voicePreference.voiceId) options.voiceId = voicePreference.voiceId;
+    if (voicePreference.modelId) options.modelId = voicePreference.modelId;
+    if (voicePreference.maxCharacters) options.maxCharacters = voicePreference.maxCharacters;
+
+    // Use per-contact voice settings if available
+    const result = await synthesizer.synthesize(state.response, options);
     const latencyMs = Date.now() - startTime;
 
-    console.log(`[Workflow] Voice synthesized: ${result.sizeBytes} bytes in ${latencyMs}ms`);
+    console.log(
+      `[Workflow] Voice synthesized for ${state.contactId}: ${result.sizeBytes} bytes in ${latencyMs}ms`
+    );
 
     // Record TTS metrics
     await metricsCollector.recordVoiceSynthesis(result.sizeBytes, latencyMs);
