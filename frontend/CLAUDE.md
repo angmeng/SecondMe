@@ -26,7 +26,10 @@ frontend/
 │   │       ├── persona/route.ts
 │   │       ├── metrics/route.ts
 │   │       ├── settings/route.ts
-│   │       └── session/route.ts
+│   │       ├── session/route.ts
+│   │       ├── channels/         # Channel management
+│   │       ├── skills/           # Skills API (proxy to orchestrator)
+│   │       └── pairing/          # Contact pairing/approval
 │   ├── components/             # React components
 │   │   ├── ui/                 # Base UI components
 │   │   │   ├── Avatar.tsx
@@ -269,6 +272,17 @@ module.exports = {
 | `/api/session` | GET | Session info |
 | `/api/channels` | GET | List all channels |
 | `/api/channels/[channelId]` | POST | Enable/disable channel (action: enable\|disable) |
+| `/api/skills` | GET | List all skills (proxy to orchestrator) |
+| `/api/skills/[skillId]` | GET | Get skill details |
+| `/api/skills/[skillId]` | POST | Enable skill |
+| `/api/skills/[skillId]` | DELETE | Disable skill |
+| `/api/skills/[skillId]` | PUT | Update skill config |
+| `/api/pairing` | GET | List pending pairing requests |
+| `/api/pairing/[contactId]` | POST | Approve contact |
+| `/api/pairing/[contactId]` | DELETE | Deny contact |
+| `/api/pairing/approved` | GET | List approved contacts |
+| `/api/pairing/approved/[contactId]` | PUT | Update contact tier |
+| `/api/pairing/approved/[contactId]` | DELETE | Revoke approval |
 
 ## Component Categories
 
