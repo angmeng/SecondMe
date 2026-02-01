@@ -20,6 +20,7 @@ import { metricsCollector } from './metrics/collector.js';
 import { getReadyDeferredMessages } from './hts/index.js';
 import { skillRegistry, registerBuiltInSkills } from './skills/index.js';
 import { createLogger } from './utils/logger.js';
+import { startDocumentConsumer, stopDocumentConsumer, getDocumentProcessor } from './documents/index.js';
 
 const PORT = process.env['ORCHESTRATOR_PORT'] || 3002;
 const NODE_ENV = process.env['NODE_ENV'] || 'development';
@@ -315,6 +316,32 @@ async function startOrchestratorService() {
       }
     });
 
+    // Document delete endpoint (for AutoMem cleanup from frontend)
+    app.delete('/documents/:documentId', async (req: Request, res: Response) => {
+      try {
+        const documentId = req.params['documentId'];
+        if (typeof documentId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid document ID' });
+          return;
+        }
+
+        const processor = getDocumentProcessor();
+        const deletedCount = await processor.deleteFromAutoMem(documentId);
+
+        res.json({
+          success: true,
+          documentId,
+          deletedChunks: deletedCount,
+          message: `Deleted ${deletedCount} chunks from AutoMem`,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete document',
+        });
+      }
+    });
+
     // Start HTTP server
     app.listen(PORT, () => {
       console.log(`[Orchestrator] HTTP server listening on port ${PORT}`);
@@ -330,6 +357,11 @@ async function startOrchestratorService() {
       console.error('[Orchestrator] Deferred message processor crashed:', error);
     });
 
+    // Start document queue consumer (for knowledge upload feature)
+    startDocumentConsumer().catch((error) => {
+      console.error('[Orchestrator] Document consumer crashed:', error);
+    });
+
     console.log(`[Orchestrator] Orchestrator service ready on port ${PORT}`);
   } catch (error) {
     console.error('[Orchestrator] Failed to start Orchestrator service:', error);
@@ -342,7 +374,8 @@ async function shutdown() {
   console.log('[Orchestrator] Shutting down gracefully...');
 
   try {
-    // Stop metrics publishing
+    // Stop consumers
+    stopDocumentConsumer();
     metricsCollector.stopPublishing();
 
     await redisClient.quit();

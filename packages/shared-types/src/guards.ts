@@ -7,6 +7,13 @@ import type { StoredMessage } from './history.js';
 import type { PairingRequest, ApprovedContact, DeniedContact } from './pairing.js';
 import type { SkillManifest, SkillConfigField, SkillInfo } from './skills.js';
 import type { ChannelMessage, QueuedMessage, ChannelId } from './channels.js';
+import type {
+  UploadedDocument,
+  QueuedDocument,
+  ExtractedFact,
+  DocumentCategory,
+  DocumentStatus,
+} from './documents.js';
 
 /**
  * Type guard for StoredMessage
@@ -304,5 +311,130 @@ export function isQueuedMessage(obj: unknown): obj is QueuedMessage {
     (msg['normalizedContactId'] === undefined || typeof msg['normalizedContactId'] === 'string') &&
     (msg['contactName'] === undefined || typeof msg['contactName'] === 'string') &&
     (msg['metadata'] === undefined || (typeof msg['metadata'] === 'object' && msg['metadata'] !== null))
+  );
+}
+
+// ============================================================
+// Document Type Guards
+// ============================================================
+
+/**
+ * Valid document categories
+ */
+const VALID_DOCUMENT_CATEGORIES: readonly DocumentCategory[] = [
+  'professional',
+  'personal',
+  'knowledge',
+  'notes',
+];
+
+/**
+ * Valid document statuses
+ */
+const VALID_DOCUMENT_STATUSES: readonly DocumentStatus[] = [
+  'pending',
+  'processing',
+  'completed',
+  'failed',
+];
+
+/**
+ * Type guard for DocumentCategory
+ * Validates that a string is a valid document category
+ *
+ * @param value - Unknown value to validate
+ * @returns true if value is a valid DocumentCategory
+ */
+export function isDocumentCategory(value: unknown): value is DocumentCategory {
+  return typeof value === 'string' && VALID_DOCUMENT_CATEGORIES.includes(value as DocumentCategory);
+}
+
+/**
+ * Type guard for DocumentStatus
+ * Validates that a string is a valid document status
+ *
+ * @param value - Unknown value to validate
+ * @returns true if value is a valid DocumentStatus
+ */
+export function isDocumentStatus(value: unknown): value is DocumentStatus {
+  return typeof value === 'string' && VALID_DOCUMENT_STATUSES.includes(value as DocumentStatus);
+}
+
+/**
+ * Type guard for ExtractedFact
+ * Validates that an unknown object has the correct shape for ExtractedFact
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid ExtractedFact
+ */
+export function isExtractedFact(obj: unknown): obj is ExtractedFact {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const fact = obj as Record<string, unknown>;
+  const validTypes = ['skill', 'experience', 'education', 'interest', 'achievement', 'general'];
+
+  return (
+    typeof fact['type'] === 'string' &&
+    validTypes.includes(fact['type']) &&
+    typeof fact['content'] === 'string' &&
+    typeof fact['confidence'] === 'number' &&
+    fact['confidence'] >= 0 &&
+    fact['confidence'] <= 1
+  );
+}
+
+/**
+ * Type guard for UploadedDocument
+ * Validates that an unknown object has the correct shape for UploadedDocument
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid UploadedDocument
+ */
+export function isUploadedDocument(obj: unknown): obj is UploadedDocument {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const doc = obj as Record<string, unknown>;
+
+  return (
+    typeof doc['id'] === 'string' &&
+    typeof doc['filename'] === 'string' &&
+    typeof doc['originalName'] === 'string' &&
+    typeof doc['mimeType'] === 'string' &&
+    typeof doc['sizeBytes'] === 'number' &&
+    isDocumentCategory(doc['category']) &&
+    typeof doc['uploadedAt'] === 'number' &&
+    isDocumentStatus(doc['status']) &&
+    // Optional fields
+    (doc['processedAt'] === undefined || typeof doc['processedAt'] === 'number') &&
+    (doc['chunkCount'] === undefined || typeof doc['chunkCount'] === 'number') &&
+    (doc['error'] === undefined || typeof doc['error'] === 'string')
+  );
+}
+
+/**
+ * Type guard for QueuedDocument
+ * Validates that an unknown object has the correct shape for QueuedDocument
+ *
+ * @param obj - Unknown object to validate
+ * @returns true if obj is a valid QueuedDocument
+ */
+export function isQueuedDocument(obj: unknown): obj is QueuedDocument {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const doc = obj as Record<string, unknown>;
+
+  return (
+    typeof doc['documentId'] === 'string' &&
+    typeof doc['originalName'] === 'string' &&
+    typeof doc['mimeType'] === 'string' &&
+    isDocumentCategory(doc['category']) &&
+    typeof doc['contentBase64'] === 'string' &&
+    typeof doc['uploadedAt'] === 'number'
   );
 }

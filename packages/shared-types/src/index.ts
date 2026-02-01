@@ -44,6 +44,12 @@ export {
   isChannelId,
   isChannelMessage,
   isQueuedMessage,
+  // Document guards
+  isDocumentCategory,
+  isDocumentStatus,
+  isExtractedFact,
+  isUploadedDocument,
+  isQueuedDocument,
 } from './guards.js';
 
 // Security types
@@ -116,3 +122,20 @@ export {
   // Task 4.1.2: Voice preference guard
   isVoicePreference,
 } from './media.js';
+
+// Document types (Personal Knowledge Upload)
+export type {
+  DocumentCategory,
+  DocumentStatus,
+  UploadedDocument,
+  DocumentChunk,
+  ExtractedFact,
+  QueuedDocument,
+  DocumentStatusEvent,
+  DocumentConfig,
+} from './documents.js';
+
+export {
+  ALLOWED_DOCUMENT_MIME_TYPES,
+  DEFAULT_DOCUMENT_CONFIG,
+} from './documents.js';

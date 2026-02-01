@@ -91,6 +91,9 @@ export interface WorkflowState {
   conversationHistory?: ConversationMessage[];
   historyMessageCount?: number;
 
+  // Owner knowledge context (from owner-knowledge skill - personal documents)
+  ownerKnowledgeContext?: string;
+
   // Response generation
   response?: string;
   tokensUsed?: number;
@@ -406,7 +409,7 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
     // Prepare images for Claude Vision (Phase 4)
     const images = state.imageContent ? [state.imageContent] : undefined;
 
-    // Call Sonnet with context, style profile, conversation history, and images
+    // Call Sonnet with context, style profile, conversation history, images, and owner knowledge
     const result = await sonnetClient.getContextualResponse(
       state.content,
       persona.styleGuide,
@@ -416,7 +419,8 @@ async function substantiveResponseNode(state: WorkflowState): Promise<Partial<Wo
       },
       state.styleProfile, // Pass contact-specific style profile
       state.conversationHistory, // Pass conversation history for multi-turn context
-      images // Pass images for Claude Vision (Phase 4)
+      images, // Pass images for Claude Vision (Phase 4)
+      state.ownerKnowledgeContext // Pass owner knowledge from uploaded documents (Phase 7)
     );
 
     const latency = Date.now() - startTime;

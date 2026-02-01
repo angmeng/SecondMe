@@ -18,7 +18,7 @@ import type { NextRequest } from 'next/server';
 const PROTECTED_METHODS = ['POST', 'PUT', 'DELETE', 'PATCH'];
 
 // API paths that require authentication for state-changing operations
-const PROTECTED_PATHS = ['/api/pairing', '/api/skills', '/api/pause', '/api/kill-switch'];
+const PROTECTED_PATHS = ['/api/pairing', '/api/skills', '/api/pause', '/api/kill-switch', '/api/documents'];
 
 /**
  * Constant-time string comparison to prevent timing attacks.
