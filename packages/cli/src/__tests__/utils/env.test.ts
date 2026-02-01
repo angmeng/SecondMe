@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import {
   validateAnthropicApiKey,
   validateOpenAIApiKey,
