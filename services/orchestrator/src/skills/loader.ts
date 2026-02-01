@@ -2,6 +2,22 @@
  * Skill Loader
  * Dynamically loads external skills from a directory
  * Task 2.1.4: External Skill Loading
+ *
+ * SECURITY WARNING: External skills are loaded via dynamic import() and run
+ * in the same Node.js process as the orchestrator. While RestrictedRedis
+ * provides Redis access control, skill code is NOT sandboxed and has full
+ * access to Node.js APIs, file system, and network.
+ *
+ * For production use with untrusted skill sources, consider:
+ * - Running skills in isolated processes (worker_threads with limited permissions)
+ * - Using vm2 or isolated-vm for JavaScript sandboxing
+ * - Running in Docker containers with restricted capabilities
+ * - Code review and signing requirements for skill packages
+ *
+ * Current implementation is suitable for:
+ * - Development and testing
+ * - Trusted internal skill development
+ * - Skills from verified/audited sources
  */
 
 import { readdir, stat } from 'node:fs/promises';

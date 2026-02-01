@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
+import { createAuditLogger } from '@/lib/audit';
 
 // Orchestrator service URL
 const ORCHESTRATOR_URL = process.env['ORCHESTRATOR_URL'] || 'http://localhost:3002';
@@ -67,7 +68,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
  * POST /api/skills/[skillId]
  * Enable a skill (proxied to orchestrator)
  */
-export async function POST(_request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { skillId } = await params;
 
@@ -85,6 +88,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
     }
 
     const data = await response.json();
+    audit('ENABLE_SKILL', 'skills', skillId);
     console.log(`[API Skills] Enabled skill: ${skillId}`);
 
     return NextResponse.json(data);
@@ -97,7 +101,9 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
  * DELETE /api/skills/[skillId]
  * Disable a skill (proxied to orchestrator)
  */
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { skillId } = await params;
 
@@ -115,6 +121,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     }
 
     const data = await response.json();
+    audit('DISABLE_SKILL', 'skills', skillId);
     console.log(`[API Skills] Disabled skill: ${skillId}`);
 
     return NextResponse.json(data);
@@ -128,6 +135,8 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
  * Update skill configuration (proxied to orchestrator)
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { skillId } = await params;
     const body = (await request.json()) as { config?: Record<string, unknown> };
@@ -152,6 +161,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     const data = await response.json();
+    audit('UPDATE_SKILL_CONFIG', 'skills', skillId, { configKeys: Object.keys(config) });
     console.log(`[API Skills] Updated config for skill: ${skillId}`);
 
     return NextResponse.json(data);

@@ -58,9 +58,21 @@ describe('RestrictedRedis', () => {
   });
 
   describe('read operations', () => {
-    it('should allow reading from unprotected keys', async () => {
+    it('should allow reading from whitelisted CACHE: keys', async () => {
       const value = await restrictedRedis.get('CACHE:some-key');
       expect(mockRedis.get).toHaveBeenCalledWith('CACHE:some-key');
+      expect(value).toBe('value');
+    });
+
+    it('should allow reading from whitelisted EXT_SKILL: keys', async () => {
+      const value = await restrictedRedis.get('EXT_SKILL:other-skill:data');
+      expect(mockRedis.get).toHaveBeenCalledWith('EXT_SKILL:other-skill:data');
+      expect(value).toBe('value');
+    });
+
+    it('should allow reading from whitelisted EMB: keys', async () => {
+      const value = await restrictedRedis.get('EMB:voyage:hash123');
+      expect(mockRedis.get).toHaveBeenCalledWith('EMB:voyage:hash123');
       expect(value).toBe('value');
     });
 
@@ -79,6 +91,21 @@ describe('RestrictedRedis', () => {
 
     it('should block reading from protected SKILLS: keys', async () => {
       await expect(restrictedRedis.get('SKILLS:enabled')).rejects.toThrow('Access denied');
+    });
+
+    it('should block reading from protected HISTORY: keys', async () => {
+      await expect(restrictedRedis.get('HISTORY:contact123')).rejects.toThrow('Access denied');
+    });
+
+    it('should block reading from protected PERSONA: keys', async () => {
+      await expect(restrictedRedis.get('PERSONA:default')).rejects.toThrow('Access denied');
+    });
+
+    it('should block reading from non-whitelisted arbitrary keys', async () => {
+      await expect(restrictedRedis.get('RANDOM:unknown-key')).rejects.toThrow('Access denied');
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('blocked from reading non-whitelisted key')
+      );
     });
   });
 

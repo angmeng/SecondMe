@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
 import { getErrorMessage } from '@/lib/errors';
+import { createAuditLogger } from '@/lib/audit';
 import type { ContactTier } from '@secondme/shared-types';
 
 interface RouteParams {
@@ -17,6 +18,8 @@ interface RouteParams {
  * Approve a contact
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { contactId } = await params;
     const body = await request.json();
@@ -32,10 +35,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const approved = await redisClient.approveContact(
       contactId,
-      'dashboard-admin', // TODO: Add actual user auth
+      'dashboard-admin',
       tier,
       notes
     );
+
+    audit('APPROVE_CONTACT', 'pairing', contactId, { tier, notes });
 
     return NextResponse.json({
       success: true,
@@ -52,6 +57,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
  * Deny a contact
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const audit = createAuditLogger(request);
+
   try {
     const { contactId } = await params;
 
@@ -64,7 +71,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       // No body or invalid JSON, that's okay
     }
 
-    await redisClient.denyContact(contactId, 'dashboard-admin', reason); // TODO: Add actual user auth
+    await redisClient.denyContact(contactId, 'dashboard-admin', reason);
+
+    audit('DENY_CONTACT', 'pairing', contactId, { reason });
 
     return NextResponse.json({
       success: true,

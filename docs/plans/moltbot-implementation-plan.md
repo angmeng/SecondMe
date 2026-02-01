@@ -1038,6 +1038,14 @@ await registerExternalSkills('/path/to/skills', logger);
 - [x] Protected key prefixes blocked
 - [x] 33 unit tests passing
 
+##### Code Review Fixes (2026-02-01)
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| Read whitelist | External skills can only read from CACHE:, EXT_SKILL:, EMB: prefixes (defense in depth) | ✅ Complete |
+| Sandboxing warning | Added security warning documenting that skills run unsandboxed in Node.js process | ✅ Complete |
+| Protected keys | Blocked HISTORY:, PERSONA:, VOICE_PREF: reads in addition to existing protected prefixes | ✅ Complete |
+
 ---
 
 ## Phase 3 Completion Summary ✅
@@ -1536,6 +1544,13 @@ export class TelegramChannel extends BaseChannel {
 - Configurable `/start` message
 - Repeated typing indicator for long responses
 
+##### Code Review Fixes (2026-02-01)
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| Backoff jitter | Added ±25% jitter to exponential backoff in `retryMessageSend` to prevent thundering herd | ✅ Complete |
+| Test update | Updated retry test to use range validation (750-1250ms) instead of exact value | ✅ Complete |
+
 ---
 
 #### Task 3.1.5: Multi-Channel Dashboard ✅ COMPLETE
@@ -1874,6 +1889,13 @@ interface TTSConfig {
 - [x] Redis caching for voice preferences (30-min TTL)
 
 **Status**: ✅ Complete (implemented in `services/orchestrator/src/media/synthesizer.ts` and `redis/voice-cache.ts`)
+
+##### Code Review Fixes (2026-02-01)
+
+| Fix | Description | Status |
+|-----|-------------|--------|
+| Voice cache tests | Added 20 unit tests in `redis/__tests__/voice-cache.test.ts` | ✅ Complete |
+| CLAUDE.md update | Documented `CACHE:voice:{contactId}` Redis key pattern | ✅ Complete |
 
 ---
 

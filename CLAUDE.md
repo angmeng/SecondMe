@@ -128,6 +128,7 @@ WhatsApp/Telegram ← Gateway ← QUEUE:responses ← Orchestrator ←
 - `PAIRING:denied:{contactId}` - Denied contact with cooldown (24h TTL)
 - `SKILLS:enabled` - Set of enabled skill IDs (no TTL)
 - `SKILLS:config:{skillId}` - JSON config per skill (no TTL)
+- `CACHE:voice:{contactId}` - Cached voice preferences (30-min TTL)
 - `LINKED:phone:{normalizedPhone}` - Cross-channel contact linking by phone (no TTL)
 - `LINKED:contact:{contactId}` - Reverse lookup: contactId → phone (no TTL)
 - `EMB:{provider}:{hash}` - Cached embeddings (5-min TTL)
@@ -302,10 +303,39 @@ The bot includes constitutional guardrails (see `specs/001-personal-ai-clone/`):
 ### API Security
 | Endpoint Type | Protection |
 |---------------|------------|
-| Dashboard APIs (`/api/*`) | Internal only (no auth required locally) |
+| Dashboard APIs (state-changing) | API key required if `DASHBOARD_API_KEY` set |
+| Dashboard APIs (read-only) | Internal only (no auth required) |
 | Service health (`/health`) | Public, read-only |
 | Redis Streams | Internal network only |
 | FalkorDB | Password-protected (`FALKORDB_PASSWORD`) |
+
+**Protected Endpoints** (require API key when `DASHBOARD_API_KEY` is set):
+- `POST/DELETE /api/pairing/*` - Approve/deny contacts
+- `PUT/DELETE /api/pairing/approved/*` - Update tier/revoke approval
+- `POST/PUT/DELETE /api/skills/*` - Enable/disable/configure skills
+- `POST/DELETE /api/pause` - Pause/resume contacts
+- `POST/DELETE /api/kill-switch` - Global pause control
+
+**Authentication Methods:**
+```bash
+# Bearer token
+curl -X POST http://localhost:3000/api/kill-switch \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"duration": 3600}'
+
+# X-API-Key header
+curl -X POST http://localhost:3000/api/kill-switch \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"duration": 3600}'
+```
+
+**Audit Logging:**
+All state-changing operations are logged with structured JSON:
+```
+[AUDIT] {"action":"ENABLE_KILL_SWITCH","resource":"kill-switch","timestamp":"2024-...","ip":"...","userAgent":"..."}
+```
 
 ### Input Validation
 - Sanitize all user input before graph queries (Cypher injection risk)
@@ -403,6 +433,7 @@ RETURN count(c) AS updated;
 | Data | Cache Location | TTL | Invalidation |
 |------|---------------|-----|--------------|
 | Personas | Redis (`PERSONA:{id}`) | 30 min | Manual on update |
+| Voice Prefs | Redis (`CACHE:voice:{contactId}`) | 30 min | On preference change |
 | Embeddings | Redis (`EMB:*`) | 5 min | Hash-based key |
 | History | In-memory LRU | Session | On disconnect |
 | Graph context | None | - | Real-time query |
