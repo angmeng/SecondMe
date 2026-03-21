@@ -623,21 +623,24 @@ async function queueResponseNode(state: WorkflowState): Promise<Partial<Workflow
  */
 async function logTokenUsage(log: TokenUsageLog): Promise<void> {
   try {
-    // Store in Redis sorted set by timestamp for easy retrieval
     const key = 'LOGS:token_usage';
     const member = JSON.stringify(log);
-    await redisClient.client.zadd(key, log.timestamp, member);
-
-    // Also increment daily counters
     const dateKey = new Date().toISOString().split('T')[0];
-    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'classification', log.classificationTokens);
-    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'response', log.responseTokens);
-    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'cache_read', log.cacheReadTokens);
-    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'cache_write', log.cacheWriteTokens);
-    await redisClient.client.hincrby(`STATS:tokens:${dateKey}`, 'total_messages', 1);
+    const statsKey = `STATS:tokens:${dateKey}`;
+    const thirtyDays = 30 * 24 * 60 * 60;
 
-    // Set expiry on daily stats (30 days)
-    await redisClient.client.expire(`STATS:tokens:${dateKey}`, 30 * 24 * 60 * 60);
+    // Pipeline all writes in a single round-trip
+    const pipeline = redisClient.client.pipeline();
+    pipeline.zadd(key, log.timestamp, member);
+    // Trim sorted set to last 10,000 entries to prevent unbounded growth
+    pipeline.zremrangebyrank(key, 0, -10001);
+    pipeline.hincrby(statsKey, 'classification', log.classificationTokens);
+    pipeline.hincrby(statsKey, 'response', log.responseTokens);
+    pipeline.hincrby(statsKey, 'cache_read', log.cacheReadTokens);
+    pipeline.hincrby(statsKey, 'cache_write', log.cacheWriteTokens);
+    pipeline.hincrby(statsKey, 'total_messages', 1);
+    pipeline.expire(statsKey, thirtyDays);
+    await pipeline.exec();
 
   } catch (error) {
     console.error('[Workflow] Error logging token usage:', error);

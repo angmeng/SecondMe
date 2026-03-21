@@ -8,6 +8,7 @@ import winston from 'winston';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import type { SecurityEventType, SecuritySeverity } from '@secondme/shared-types';
+import { extractPhoneFromContactId } from '@secondme/shared-types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -173,10 +174,9 @@ export function logSocketEvent(
  * Shows first 4 and last 2 digits: 1234****89@c.us
  */
 function maskContactId(contactId: string): string {
-  const phone = contactId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+  const phone = extractPhoneFromContactId(contactId);
   if (phone.length <= 6) return contactId;
-  const suffix = contactId.endsWith('@c.us') ? '@c.us' : '@s.whatsapp.net';
-  return phone.slice(0, 4) + '****' + phone.slice(-2) + suffix;
+  return phone.slice(0, 4) + '****' + phone.slice(-2);
 }
 
 /**

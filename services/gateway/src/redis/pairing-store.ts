@@ -27,6 +27,7 @@ import {
   isPairingRequest,
   isApprovedContact,
   parseIntEnv,
+  extractPhoneFromContactId,
 } from '@secondme/shared-types';
 
 /**
@@ -175,10 +176,10 @@ class PairingStore {
   }
 
   /**
-   * Extract phone number from WhatsApp contact ID
+   * Extract phone number from platform-specific contact ID
    */
   private extractPhoneNumber(contactId: string): string {
-    return contactId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+    return extractPhoneFromContactId(contactId);
   }
 
   /**

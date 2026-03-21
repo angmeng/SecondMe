@@ -11,7 +11,7 @@ import type {
   LinkedContact,
   StoredLinkedContact,
 } from '@secondme/shared-types';
-import { isStoredLinkedContact } from '@secondme/shared-types';
+import { isStoredLinkedContact, extractPhoneFromContactId } from '@secondme/shared-types';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
@@ -460,7 +460,7 @@ class RedisClient {
     const now = Date.now();
     const approved: ApprovedContact = {
       contactId,
-      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      phoneNumber: pending?.phoneNumber || extractPhoneFromContactId(contactId),
       ...(pending?.displayName && { displayName: pending.displayName }),
       ...(pending?.profilePicUrl && { profilePicUrl: pending.profilePicUrl }),
       approvedAt: now,
@@ -501,7 +501,7 @@ class RedisClient {
 
     const denied = {
       contactId,
-      phoneNumber: pending?.phoneNumber || contactId.replace('@c.us', ''),
+      phoneNumber: pending?.phoneNumber || extractPhoneFromContactId(contactId),
       ...(pending?.displayName && { displayName: pending.displayName }),
       deniedAt: now,
       deniedBy,

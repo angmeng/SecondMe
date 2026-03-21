@@ -13,6 +13,7 @@
  */
 
 import type { ChannelMessage, ChannelId, ContactTier, DownloadedMedia } from '@secondme/shared-types';
+import { extractPhoneFromContactId } from '@secondme/shared-types';
 import { DEFAULT_MEDIA_LIMITS } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
@@ -558,7 +559,7 @@ export class GatewayMessageProcessor {
     }
 
     // No existing history or auto-approve disabled -> store as pending
-    const phoneNumber = contactId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+    const phoneNumber = extractPhoneFromContactId(contactId);
 
     const result = await this.deps.pairingStore.createPairingRequest(
       contactId,

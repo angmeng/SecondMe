@@ -172,11 +172,20 @@ export class RetrievalFusion {
       };
     }
 
+    // Fetch shared contact context once (used by both keyword and graph retrieval)
+    let sharedContext: ContactContext;
+    try {
+      sharedContext = await getContactContext(contactId);
+    } catch (error) {
+      console.warn('[Retrieval Fusion] Contact context fetch failed:', error);
+      sharedContext = { people: [], topics: [], events: [] };
+    }
+
     // Run all retrieval sources in parallel
     const [semanticResult, keywordResult, graphResult, historyResult] = await Promise.all([
       this.semanticRetrieval(message, contactId),
-      this.keywordRetrieval(message, contactId),
-      this.graphRetrieval(contactId),
+      this.keywordRetrievalFromContext(message, sharedContext),
+      this.graphRetrievalFromContext(sharedContext),
       historyCache.getRecentHistory(contactId),
     ]);
 
@@ -316,10 +325,10 @@ export class RetrievalFusion {
   /**
    * Keyword-based retrieval using message content analysis
    */
-  private async keywordRetrieval(
+  private keywordRetrievalFromContext(
     message: string,
-    contactId: string
-  ): Promise<ContactContext> {
+    fullContext: ContactContext
+  ): ContactContext {
     try {
       // Extract keywords from the message
       const keywords = extractKeywords(message);
@@ -327,9 +336,6 @@ export class RetrievalFusion {
       if (keywords.size === 0) {
         return { people: [], topics: [], events: [] };
       }
-
-      // Get full context and filter by keywords
-      const fullContext = await getContactContext(contactId);
 
       // Score and filter by keyword match
       const keywordArray = Array.from(keywords);
@@ -368,21 +374,14 @@ export class RetrievalFusion {
   }
 
   /**
-   * Graph-based retrieval for entity relationships
+   * Graph-based retrieval for entity relationships (uses pre-fetched context)
    */
-  private async graphRetrieval(contactId: string): Promise<ContactContext> {
-    try {
-      const context = await getContactContext(contactId);
-
-      return {
-        people: context.people.slice(0, this.config.maxResultsPerSource.people),
-        topics: context.topics.slice(0, this.config.maxResultsPerSource.topics),
-        events: context.events.slice(0, this.config.maxResultsPerSource.events),
-      };
-    } catch (error) {
-      console.warn('[Retrieval Fusion] Graph retrieval failed:', error);
-      return { people: [], topics: [], events: [] };
-    }
+  private graphRetrievalFromContext(context: ContactContext): ContactContext {
+    return {
+      people: context.people.slice(0, this.config.maxResultsPerSource.people),
+      topics: context.topics.slice(0, this.config.maxResultsPerSource.topics),
+      events: context.events.slice(0, this.config.maxResultsPerSource.events),
+    };
   }
 
   /**
