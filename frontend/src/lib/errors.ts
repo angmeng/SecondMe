@@ -20,3 +20,36 @@ export function handleApiError(context: string, error: unknown): string {
   console.error(`[${context}] Error:`, error);
   return message;
 }
+
+/**
+ * Check if an error is a service connection failure (ECONNREFUSED / fetch failed)
+ */
+export function isConnectionError(error: unknown): boolean {
+  const msg = getErrorMessage(error);
+  return msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
+}
+
+/**
+ * Build a NextResponse-compatible error object for service proxy routes.
+ * Returns { body, status } — caller wraps with NextResponse.json().
+ */
+export function serviceProxyError(
+  error: unknown,
+  context: string,
+  serviceName: string,
+  servicePort: number
+): { body: Record<string, unknown>; status: number } {
+  console.error(`[${context}] Error:`, error);
+
+  if (isConnectionError(error)) {
+    return {
+      body: { error: `${serviceName} service unavailable. Ensure it is running on port ${servicePort}.` },
+      status: 503,
+    };
+  }
+
+  return {
+    body: { error: getErrorMessage(error) },
+    status: 500,
+  };
+}

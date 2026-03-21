@@ -7,9 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
 import { createAuditLogger } from '@/lib/audit';
 import { documentStore } from '@/lib/document-store';
-
-// Orchestrator URL for AutoMem cleanup
-const ORCHESTRATOR_URL = process.env['ORCHESTRATOR_URL'] || 'http://localhost:3002';
+import { ORCHESTRATOR_URL } from '@/lib/service-urls';
 
 interface RouteParams {
   params: Promise<{ id: string }>;

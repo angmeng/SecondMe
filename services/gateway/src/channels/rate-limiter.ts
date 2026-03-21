@@ -13,6 +13,7 @@ import type {
   RateLimitCheckOptions,
 } from './types.js';
 import { DEFAULT_RATE_LIMITER_CONFIG } from './types.js';
+import { maskContactId } from '@secondme/shared-types';
 
 /**
  * Lua script for atomic increment with TTL on first message.
@@ -84,23 +85,7 @@ export class RateLimiter {
     return `PAUSE:${contactId}`;
   }
 
-  /**
-   * Mask contact ID for privacy in logs
-   * Example: '1234567890@c.us' -> '1234****90@c.us'
-   */
-  private maskContactId(contactId: string): string {
-    // Handle WhatsApp format: number@c.us
-    const atIndex = contactId.indexOf('@');
-    if (atIndex > 0) {
-      const phone = contactId.slice(0, atIndex);
-      const suffix = contactId.slice(atIndex);
-      if (phone.length <= 6) return contactId;
-      return phone.slice(0, 4) + '****' + phone.slice(-2) + suffix;
-    }
-    // Handle other formats
-    if (contactId.length <= 6) return contactId;
-    return contactId.slice(0, 4) + '****' + contactId.slice(-2);
-  }
+
 
   /**
    * Check if a message from a contact is allowed (increments counter)
@@ -132,8 +117,8 @@ export class RateLimiter {
           autoPaused = await this.triggerAutoPause(contactId, count, channelId);
         }
 
-        this.deps.logger.warn(`Rate limit exceeded for ${this.maskContactId(contactId)}`, {
-          contactId: this.maskContactId(contactId),
+        this.deps.logger.warn(`Rate limit exceeded for ${maskContactId(contactId)}`, {
+          contactId: maskContactId(contactId),
           channelId,
           count,
           threshold,
@@ -159,7 +144,7 @@ export class RateLimiter {
     } catch (error) {
       // Log error but don't block message on Redis failure
       this.deps.logger.error('Error checking rate limit', {
-        contactId: this.maskContactId(contactId),
+        contactId: maskContactId(contactId),
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -221,7 +206,7 @@ export class RateLimiter {
       return true;
     } catch (error) {
       this.deps.logger.error('Error triggering auto-pause', {
-        contactId: this.maskContactId(contactId),
+        contactId: maskContactId(contactId),
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -252,8 +237,8 @@ export class RateLimiter {
     try {
       await this.deps.redis.del(...keys);
 
-      this.deps.logger.info(`Rate limit reset for ${this.maskContactId(contactId)}`, {
-        contactId: this.maskContactId(contactId),
+      this.deps.logger.info(`Rate limit reset for ${maskContactId(contactId)}`, {
+        contactId: maskContactId(contactId),
         channelId,
         clearedPause: clearPause,
       });
@@ -281,7 +266,7 @@ export class RateLimiter {
       }
     } catch (error) {
       this.deps.logger.error('Error resetting rate limit', {
-        contactId: this.maskContactId(contactId),
+        contactId: maskContactId(contactId),
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -302,7 +287,7 @@ export class RateLimiter {
       return value ? parseInt(value, 10) : 0;
     } catch (error) {
       this.deps.logger.error('Error getting rate limit count', {
-        contactId: this.maskContactId(contactId),
+        contactId: maskContactId(contactId),
         error: error instanceof Error ? error.message : String(error),
       });
       return 0;

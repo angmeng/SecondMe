@@ -13,7 +13,7 @@
  */
 
 import type { ChannelMessage, ChannelId, ContactTier, DownloadedMedia } from '@secondme/shared-types';
-import { extractPhoneFromContactId } from '@secondme/shared-types';
+import { extractPhoneFromContactId, maskContactId } from '@secondme/shared-types';
 import { DEFAULT_MEDIA_LIMITS } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
@@ -169,8 +169,8 @@ export class GatewayMessageProcessor {
   async processMessage(message: ChannelMessage, contactName?: string): Promise<ProcessResult> {
     const { contactId, content, id: messageId, timestamp, channelId, normalizedContactId } = message;
 
-    this.deps.logger.info(`Processing message from ${this.maskContactId(contactId)}`, {
-      contactId: this.maskContactId(contactId),
+    this.deps.logger.info(`Processing message from ${maskContactId(contactId)}`, {
+      contactId: maskContactId(contactId),
       messageId,
       channelId,
     });
@@ -184,13 +184,13 @@ export class GatewayMessageProcessor {
           normalizedContactId,
           contactName
         );
-        this.deps.logger.debug(`Linked contact ${this.maskContactId(contactId)} to phone`, {
-          contactId: this.maskContactId(contactId),
+        this.deps.logger.debug(`Linked contact ${maskContactId(contactId)} to phone`, {
+          contactId: maskContactId(contactId),
           channelId,
         });
       } catch (error) {
         // Log but don't fail - linking is non-critical
-        this.deps.logger.warn(`Failed to link contact ${this.maskContactId(contactId)}`, {
+        this.deps.logger.warn(`Failed to link contact ${maskContactId(contactId)}`, {
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -209,9 +209,9 @@ export class GatewayMessageProcessor {
       if (linkedResult.approved) {
         // Auto-approve this contact with the same tier as the linked contact
         this.deps.logger.info(
-          `Auto-approving ${this.maskContactId(contactId)} via linked contact ${linkedResult.approvedContactId}`,
+          `Auto-approving ${maskContactId(contactId)} via linked contact ${linkedResult.approvedContactId}`,
           {
-            contactId: this.maskContactId(contactId),
+            contactId: maskContactId(contactId),
             channelId,
             linkedContactId: linkedResult.approvedContactId,
             tier: linkedResult.tier,
@@ -243,8 +243,8 @@ export class GatewayMessageProcessor {
     // STEP 3: Check pause state
     const isPaused = await this.deps.redisClient.isPaused(contactId);
     if (isPaused) {
-      this.deps.logger.info(`Contact ${this.maskContactId(contactId)} is paused, skipping`, {
-        contactId: this.maskContactId(contactId),
+      this.deps.logger.info(`Contact ${maskContactId(contactId)} is paused, skipping`, {
+        contactId: maskContactId(contactId),
         channelId,
       });
       return { processed: true, reason: 'paused' };
@@ -254,9 +254,9 @@ export class GatewayMessageProcessor {
     const rateLimitResult = await this.deps.rateLimiter.check(contactId, { channelId });
     if (!rateLimitResult.allowed) {
       this.deps.logger.info(
-        `Rate limit exceeded for ${this.maskContactId(contactId)}, auto-paused`,
+        `Rate limit exceeded for ${maskContactId(contactId)}, auto-paused`,
         {
-          contactId: this.maskContactId(contactId),
+          contactId: maskContactId(contactId),
           channelId,
           count: rateLimitResult.currentCount,
           threshold: rateLimitResult.threshold,
@@ -278,9 +278,9 @@ export class GatewayMessageProcessor {
           const estimatedPayloadSize = downloaded.base64.length;
           if (estimatedPayloadSize > MAX_QUEUE_PAYLOAD_SIZE_BYTES) {
             this.deps.logger.warn(
-              `Media too large to queue for ${this.maskContactId(contactId)}, skipping media`,
+              `Media too large to queue for ${maskContactId(contactId)}, skipping media`,
               {
-                contactId: this.maskContactId(contactId),
+                contactId: maskContactId(contactId),
                 channelId,
                 mediaType: message.mediaType,
                 sizeMB: Math.round(estimatedPayloadSize / 1024 / 1024),
@@ -294,9 +294,9 @@ export class GatewayMessageProcessor {
           ) {
             // Also check against Whisper/Claude limits
             this.deps.logger.warn(
-              `Media exceeds processing limits for ${this.maskContactId(contactId)}, skipping media`,
+              `Media exceeds processing limits for ${maskContactId(contactId)}, skipping media`,
               {
-                contactId: this.maskContactId(contactId),
+                contactId: maskContactId(contactId),
                 channelId,
                 mediaType: message.mediaType,
                 sizeMB: Math.round(downloaded.sizeBytes / 1024 / 1024),
@@ -306,8 +306,8 @@ export class GatewayMessageProcessor {
           } else {
             mediaBase64 = downloaded.base64;
             mediaMimeType = downloaded.mimeType;
-            this.deps.logger.info(`Downloaded media for ${this.maskContactId(contactId)}`, {
-              contactId: this.maskContactId(contactId),
+            this.deps.logger.info(`Downloaded media for ${maskContactId(contactId)}`, {
+              contactId: maskContactId(contactId),
               channelId,
               mediaType: message.mediaType,
               sizeKB: downloaded.sizeBytes ? Math.round(downloaded.sizeBytes / 1024) : 'unknown',
@@ -316,8 +316,8 @@ export class GatewayMessageProcessor {
         }
       } catch (error) {
         // Log but don't fail - message can still be processed without media
-        this.deps.logger.warn(`Failed to download media for ${this.maskContactId(contactId)}`, {
-          contactId: this.maskContactId(contactId),
+        this.deps.logger.warn(`Failed to download media for ${maskContactId(contactId)}`, {
+          contactId: maskContactId(contactId),
           channelId,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -347,7 +347,7 @@ export class GatewayMessageProcessor {
     await this.deps.redisClient.queueMessage(messagePayload);
 
     this.deps.logger.info(`Message queued for processing: ${messageId}`, {
-      contactId: this.maskContactId(contactId),
+      contactId: maskContactId(contactId),
       messageId,
       channelId,
     });
@@ -381,8 +381,8 @@ export class GatewayMessageProcessor {
   ): Promise<void> {
     const timestamp = Date.now();
 
-    this.deps.logger.info(`fromMe message detected to ${this.maskContactId(contactId)}`, {
-      contactId: this.maskContactId(contactId),
+    this.deps.logger.info(`fromMe message detected to ${maskContactId(contactId)}`, {
+      contactId: maskContactId(contactId),
       messageId,
       channelId,
     });
@@ -418,9 +418,9 @@ export class GatewayMessageProcessor {
     );
 
     this.deps.logger.info(
-      `Auto-pause triggered for ${this.maskContactId(contactId)} (indefinite) due to fromMe`,
+      `Auto-pause triggered for ${maskContactId(contactId)} (indefinite) due to fromMe`,
       {
-        contactId: this.maskContactId(contactId),
+        contactId: maskContactId(contactId),
         channelId,
         pausedAt,
       }
@@ -454,8 +454,8 @@ export class GatewayMessageProcessor {
     // Check if denied (cooling off period)
     const isDenied = await this.deps.pairingStore.isDenied(contactId);
     if (isDenied) {
-      this.deps.logger.info(`Contact ${this.maskContactId(contactId)} is denied, ignoring`, {
-        contactId: this.maskContactId(contactId),
+      this.deps.logger.info(`Contact ${maskContactId(contactId)} is denied, ignoring`, {
+        contactId: maskContactId(contactId),
         channelId,
       });
       return { processed: true, reason: 'denied' };
@@ -467,9 +467,9 @@ export class GatewayMessageProcessor {
 
       if (hasHistory) {
         this.deps.logger.info(
-          `Auto-approving existing contact ${this.maskContactId(contactId)} (has history)`,
+          `Auto-approving existing contact ${maskContactId(contactId)} (has history)`,
           {
-            contactId: this.maskContactId(contactId),
+            contactId: maskContactId(contactId),
             channelId,
           }
         );
@@ -570,8 +570,8 @@ export class GatewayMessageProcessor {
     );
 
     if (result.success) {
-      this.deps.logger.info(`Created pending request for ${this.maskContactId(contactId)}`, {
-        contactId: this.maskContactId(contactId),
+      this.deps.logger.info(`Created pending request for ${maskContactId(contactId)}`, {
+        contactId: maskContactId(contactId),
         channelId,
       });
 
@@ -590,14 +590,14 @@ export class GatewayMessageProcessor {
         try {
           const autoReplyMessage = this.deps.pairingStore.getAutoReplyMessage();
           await this.deps.sendMessage(contactId, autoReplyMessage);
-          this.deps.logger.info(`Auto-reply sent to ${this.maskContactId(contactId)}`, {
-            contactId: this.maskContactId(contactId),
+          this.deps.logger.info(`Auto-reply sent to ${maskContactId(contactId)}`, {
+            contactId: maskContactId(contactId),
             channelId,
           });
         } catch (error) {
           // Log but don't fail - pending request was already created
-          this.deps.logger.error(`Failed to send auto-reply to ${this.maskContactId(contactId)}`, {
-            contactId: this.maskContactId(contactId),
+          this.deps.logger.error(`Failed to send auto-reply to ${maskContactId(contactId)}`, {
+            contactId: maskContactId(contactId),
             channelId,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -608,20 +608,20 @@ export class GatewayMessageProcessor {
     } else if (result.reason === 'already_approved') {
       // Race condition - contact was approved between checks
       this.deps.logger.info(
-        `Contact ${this.maskContactId(contactId)} already approved (race condition)`,
-        { contactId: this.maskContactId(contactId), channelId }
+        `Contact ${maskContactId(contactId)} already approved (race condition)`,
+        { contactId: maskContactId(contactId), channelId }
       );
       // Re-process as approved
       return this.processMessage(message, contactName);
     } else if (result.reason === 'already_pending') {
       this.deps.logger.info(
-        `Contact ${this.maskContactId(contactId)} already pending (message ignored)`,
-        { contactId: this.maskContactId(contactId), channelId }
+        `Contact ${maskContactId(contactId)} already pending (message ignored)`,
+        { contactId: maskContactId(contactId), channelId }
       );
       return { processed: true, reason: 'unapproved', pairingRequest: false };
     } else if (result.reason === 'denied_cooldown') {
-      this.deps.logger.info(`Contact ${this.maskContactId(contactId)} is in cooldown period`, {
-        contactId: this.maskContactId(contactId),
+      this.deps.logger.info(`Contact ${maskContactId(contactId)} is in cooldown period`, {
+        contactId: maskContactId(contactId),
         channelId,
       });
       return { processed: true, reason: 'denied' };
@@ -630,18 +630,4 @@ export class GatewayMessageProcessor {
     return { processed: true, reason: 'unapproved' };
   }
 
-  /**
-   * Mask contact ID for privacy in logs
-   */
-  private maskContactId(contactId: string): string {
-    const atIndex = contactId.indexOf('@');
-    if (atIndex > 0) {
-      const phone = contactId.slice(0, atIndex);
-      const suffix = contactId.slice(atIndex);
-      if (phone.length <= 6) return contactId;
-      return phone.slice(0, 4) + '****' + phone.slice(-2) + suffix;
-    }
-    if (contactId.length <= 6) return contactId;
-    return contactId.slice(0, 4) + '****' + contactId.slice(-2);
-  }
 }

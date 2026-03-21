@@ -4,35 +4,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getErrorMessage } from '@/lib/errors';
+import { serviceProxyError } from '@/lib/errors';
 import { createAuditLogger } from '@/lib/audit';
-
-// Orchestrator service URL
-const ORCHESTRATOR_URL = process.env['ORCHESTRATOR_URL'] || 'http://localhost:3002';
+import { ORCHESTRATOR_URL } from '@/lib/service-urls';
 
 interface RouteParams {
   params: Promise<{
     skillId: string;
   }>;
-}
-
-/**
- * Helper to handle orchestrator fetch errors
- */
-function handleFetchError(error: unknown, operation: string): NextResponse {
-  console.error(`[API Skills] Error ${operation}:`, error);
-
-  const errorMessage = getErrorMessage(error);
-  const isConnectionError = errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed');
-
-  return NextResponse.json(
-    {
-      error: isConnectionError
-        ? 'Orchestrator service unavailable. Ensure it is running on port 3002.'
-        : errorMessage,
-    },
-    { status: isConnectionError ? 503 : 500 }
-  );
 }
 
 /**
@@ -60,7 +39,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    return handleFetchError(error, 'getting skill');
+    const { body, status } = serviceProxyError(error, 'API Skills', 'Orchestrator', 3002);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -93,7 +73,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(data);
   } catch (error) {
-    return handleFetchError(error, 'enabling skill');
+    const { body, status } = serviceProxyError(error, 'API Skills', 'Orchestrator', 3002);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -126,7 +107,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(data);
   } catch (error) {
-    return handleFetchError(error, 'disabling skill');
+    const { body, status } = serviceProxyError(error, 'API Skills', 'Orchestrator', 3002);
+    return NextResponse.json(body, { status });
   }
 }
 
@@ -166,6 +148,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(data);
   } catch (error) {
-    return handleFetchError(error, 'updating skill config');
+    const { body, status } = serviceProxyError(error, 'API Skills', 'Orchestrator', 3002);
+    return NextResponse.json(body, { status });
   }
 }

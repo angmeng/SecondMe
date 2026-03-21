@@ -23,3 +23,21 @@ export function extractPhoneFromContactId(contactId: string): string {
 
   return contactId;
 }
+
+/**
+ * Mask a contact ID for privacy in logs.
+ * Shows first 4 and last 2 characters of the identifier portion.
+ * Example: '1234567890@c.us' -> '1234****90@c.us'
+ * Example: 'tg_123456789' -> 'tg_1****89'
+ */
+export function maskContactId(contactId: string): string {
+  const atIndex = contactId.indexOf('@');
+  if (atIndex > 0) {
+    const phone = contactId.slice(0, atIndex);
+    const suffix = contactId.slice(atIndex);
+    if (phone.length <= 6) return contactId;
+    return phone.slice(0, 4) + '****' + phone.slice(-2) + suffix;
+  }
+  if (contactId.length <= 6) return contactId;
+  return contactId.slice(0, 4) + '****' + contactId.slice(-2);
+}

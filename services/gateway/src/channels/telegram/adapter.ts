@@ -64,6 +64,7 @@ export class TelegramChannel extends BaseChannel {
   private pollingPromise: Promise<void> | null = null;
 
   private contactCache = new Map<string, ChannelContact>();
+  private static readonly MAX_CACHE_SIZE = 1000;
 
   constructor(
     deps: TelegramChannelDeps,
@@ -99,6 +100,12 @@ export class TelegramChannel extends BaseChannel {
       channelId: this.id,
       displayName: ctx.from.first_name + (ctx.from.last_name ? ` ${ctx.from.last_name}` : ''),
     };
+
+    // Evict oldest entry if cache is full
+    if (this.contactCache.size >= TelegramChannel.MAX_CACHE_SIZE) {
+      const firstKey = this.contactCache.keys().next().value;
+      if (firstKey) this.contactCache.delete(firstKey);
+    }
 
     this.contactCache.set(contactId, contact);
   }

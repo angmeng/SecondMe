@@ -4,10 +4,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getErrorMessage } from '@/lib/errors';
-
-// Orchestrator service URL
-const ORCHESTRATOR_URL = process.env['ORCHESTRATOR_URL'] || 'http://localhost:3002';
+import { serviceProxyError } from '@/lib/errors';
+import { ORCHESTRATOR_URL } from '@/lib/service-urls';
 
 /**
  * GET /api/skills
@@ -37,19 +35,7 @@ export async function GET() {
       count: data.count,
     });
   } catch (error) {
-    console.error('[API Skills] Error listing skills:', error);
-
-    // Check if it's a connection error (orchestrator not running)
-    const errorMessage = getErrorMessage(error);
-    const isConnectionError = errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed');
-
-    return NextResponse.json(
-      {
-        error: isConnectionError
-          ? 'Orchestrator service unavailable. Ensure it is running on port 3002.'
-          : errorMessage,
-      },
-      { status: isConnectionError ? 503 : 500 }
-    );
+    const { body, status } = serviceProxyError(error, 'API Skills', 'Orchestrator', 3002);
+    return NextResponse.json(body, { status });
   }
 }

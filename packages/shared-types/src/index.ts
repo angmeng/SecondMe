@@ -33,7 +33,7 @@ export { DEFAULT_PAIRING_CONFIG } from './pairing.js';
 export { parseIntEnv, parseFloatEnv } from './env-utils.js';
 
 // Contact ID utilities
-export { extractPhoneFromContactId } from './contact-utils.js';
+export { extractPhoneFromContactId, maskContactId } from './contact-utils.js';
 
 // Runtime type guards
 export {

@@ -4,8 +4,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-
-const GATEWAY_URL = process.env['GATEWAY_URL'] || 'http://localhost:3001';
+import { serviceProxyError } from '@/lib/errors';
+import { GATEWAY_URL } from '@/lib/service-urls';
 
 interface RouteParams {
   params: Promise<{
@@ -48,19 +48,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error('[API Channels] Error updating channel:', error);
-
-    const isConnectionError =
-      error instanceof Error &&
-      (error.message.includes('ECONNREFUSED') || error.message.includes('fetch failed'));
-
-    return NextResponse.json(
-      {
-        error: isConnectionError
-          ? 'Gateway service unavailable. Ensure it is running on port 3001.'
-          : 'Failed to update channel',
-      },
-      { status: isConnectionError ? 503 : 500 }
-    );
+    const { body, status } = serviceProxyError(error, 'API Channels', 'Gateway', 3001);
+    return NextResponse.json(body, { status });
   }
 }
