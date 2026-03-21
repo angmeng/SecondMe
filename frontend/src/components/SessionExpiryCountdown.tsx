@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { socketClient } from '@/lib/socket';
 import { getErrorMessage } from '@/lib/errors';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 interface SessionInfo {
   isActive: boolean;
@@ -126,9 +127,9 @@ export default function SessionExpiryCountdown({ className = '', compact = false
       );
     };
 
-    socket.on('session_update', handleSessionUpdate);
-    socket.on('session_expiry_warning', handleExpiryWarning);
-    socket.on('session_expired', handleSessionExpired);
+    socket.on(SOCKET_EVENTS.SESSION_UPDATE, handleSessionUpdate);
+    socket.on(SOCKET_EVENTS.SESSION_EXPIRY_WARNING, handleExpiryWarning);
+    socket.on(SOCKET_EVENTS.SESSION_EXPIRED, handleSessionExpired);
 
     // Also listen for WhatsApp connection status changes
     const handleConnectionStatus = (data: {
@@ -159,9 +160,9 @@ export default function SessionExpiryCountdown({ className = '', compact = false
     const interval = setInterval(loadSessionInfo, 60000); // Every minute
 
     return () => {
-      socket.off('session_update', handleSessionUpdate);
-      socket.off('session_expiry_warning', handleExpiryWarning);
-      socket.off('session_expired', handleSessionExpired);
+      socket.off(SOCKET_EVENTS.SESSION_UPDATE, handleSessionUpdate);
+      socket.off(SOCKET_EVENTS.SESSION_EXPIRY_WARNING, handleExpiryWarning);
+      socket.off(SOCKET_EVENTS.SESSION_EXPIRED, handleSessionExpired);
       socketClient.offConnectionStatus(handleConnectionStatus);
       clearInterval(interval);
     };

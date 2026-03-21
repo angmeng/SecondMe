@@ -4,6 +4,7 @@
  */
 
 import { Server } from 'socket.io';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 export class SocketEventEmitter {
   private io: Server;
@@ -16,7 +17,7 @@ export class SocketEventEmitter {
    * Broadcast QR code to all connected clients
    */
   emitQRCode(qr: string): void {
-    this.io.emit('qr_code', {
+    this.io.emit(SOCKET_EVENTS.QR_CODE, {
       qr,
       timestamp: Date.now(),
     });
@@ -27,7 +28,7 @@ export class SocketEventEmitter {
    * Broadcast connection status
    */
   emitConnectionStatus(status: 'connected' | 'disconnected' | 'qr' | 'ready' | 'authenticated'): void {
-    this.io.emit('connection_status', {
+    this.io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
       status,
       timestamp: Date.now(),
     });
@@ -43,7 +44,7 @@ export class SocketEventEmitter {
     reason?: string;
     pausedAt?: number;
   }): void {
-    this.io.emit('pause_update', {
+    this.io.emit(SOCKET_EVENTS.PAUSE_UPDATE, {
       ...data,
       timestamp: Date.now(),
     });
@@ -58,7 +59,7 @@ export class SocketEventEmitter {
     contactName: string;
     preview: string;
   }): void {
-    this.io.emit('message_received', {
+    this.io.emit(SOCKET_EVENTS.MESSAGE_RECEIVED, {
       ...data,
       timestamp: Date.now(),
     });
@@ -71,7 +72,7 @@ export class SocketEventEmitter {
     contactId: string;
     messageId: string;
   }): void {
-    this.io.emit('message_sent', {
+    this.io.emit(SOCKET_EVENTS.MESSAGE_SENT, {
       ...data,
       timestamp: Date.now(),
     });
@@ -84,7 +85,7 @@ export class SocketEventEmitter {
     contactId: string;
     error: string;
   }): void {
-    this.io.emit('message_failed', {
+    this.io.emit(SOCKET_EVENTS.MESSAGE_FAILED, {
       ...data,
       timestamp: Date.now(),
     });
@@ -97,7 +98,7 @@ export class SocketEventEmitter {
     contactId: string;
     isTyping: boolean;
   }): void {
-    this.io.emit('typing_status', {
+    this.io.emit(SOCKET_EVENTS.TYPING_STATUS, {
       ...data,
       timestamp: Date.now(),
     });
@@ -110,7 +111,7 @@ export class SocketEventEmitter {
     percent: number;
     message: string;
   }): void {
-    this.io.emit('loading_status', {
+    this.io.emit(SOCKET_EVENTS.LOADING_STATUS, {
       ...data,
       timestamp: Date.now(),
     });
@@ -125,7 +126,7 @@ export class SocketEventEmitter {
     threshold: number;
     pausedAt: number;
   }): void {
-    this.io.emit('rate_limit', {
+    this.io.emit(SOCKET_EVENTS.RATE_LIMIT, {
       ...data,
       timestamp: Date.now(),
     });
@@ -140,7 +141,7 @@ export class SocketEventEmitter {
     message: string;
     details?: any;
   }): void {
-    this.io.emit('error', {
+    this.io.emit(SOCKET_EVENTS.ERROR, {
       ...data,
       timestamp: Date.now(),
     });

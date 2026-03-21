@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { socketClient } from '@/lib/socket';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 interface ServiceStatus {
   name: string;
@@ -49,13 +50,13 @@ export default function BotStatus({ className = '', showDetails = true }: Props)
       setStatus((prev) => ({ ...prev, ...data }));
     };
 
-    socket.on('bot_status_update', handleStatusUpdate);
+    socket.on(SOCKET_EVENTS.BOT_STATUS_UPDATE, handleStatusUpdate);
 
     // Refresh periodically
     const interval = setInterval(fetchStatus, 60000); // Every minute
 
     return () => {
-      socket.off('bot_status_update', handleStatusUpdate);
+      socket.off(SOCKET_EVENTS.BOT_STATUS_UPDATE, handleStatusUpdate);
       clearInterval(interval);
     };
   }, []);

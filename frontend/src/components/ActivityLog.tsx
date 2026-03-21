@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { socketClient } from '@/lib/socket';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 import type {
   MessageReceivedEvent,
   MessageSentEvent,
@@ -126,20 +127,20 @@ export default function ActivityLog({
     };
 
     // Subscribe to events
-    socket.on('message_received', handleMessageReceived);
-    socket.on('message_sent', handleMessageSent);
-    socket.on('pause_update', handlePauseUpdate);
-    socket.on('rate_limit_triggered', handleRateLimit);
-    socket.on('error', handleError);
-    socket.on('session_expiry_warning', handleSessionUpdate);
+    socket.on(SOCKET_EVENTS.MESSAGE_RECEIVED, handleMessageReceived);
+    socket.on(SOCKET_EVENTS.MESSAGE_SENT, handleMessageSent);
+    socket.on(SOCKET_EVENTS.PAUSE_UPDATE, handlePauseUpdate);
+    socket.on(SOCKET_EVENTS.RATE_LIMIT_TRIGGERED, handleRateLimit);
+    socket.on(SOCKET_EVENTS.ERROR, handleError);
+    socket.on(SOCKET_EVENTS.SESSION_EXPIRY_WARNING, handleSessionUpdate);
 
     return () => {
-      socket.off('message_received', handleMessageReceived);
-      socket.off('message_sent', handleMessageSent);
-      socket.off('pause_update', handlePauseUpdate);
-      socket.off('rate_limit_triggered', handleRateLimit);
-      socket.off('error', handleError);
-      socket.off('session_expiry_warning', handleSessionUpdate);
+      socket.off(SOCKET_EVENTS.MESSAGE_RECEIVED, handleMessageReceived);
+      socket.off(SOCKET_EVENTS.MESSAGE_SENT, handleMessageSent);
+      socket.off(SOCKET_EVENTS.PAUSE_UPDATE, handlePauseUpdate);
+      socket.off(SOCKET_EVENTS.RATE_LIMIT_TRIGGERED, handleRateLimit);
+      socket.off(SOCKET_EVENTS.ERROR, handleError);
+      socket.off(SOCKET_EVENTS.SESSION_EXPIRY_WARNING, handleSessionUpdate);
     };
   }, [addEntry]);
 

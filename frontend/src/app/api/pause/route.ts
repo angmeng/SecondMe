@@ -6,12 +6,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
 import { getErrorMessage } from '@/lib/errors';
+import { createAuditLogger } from '@/lib/audit';
 
 /**
  * POST /api/pause - Set pause for contact (indefinite)
  * Body: { contactId: string }
  */
 export async function POST(request: NextRequest) {
+  const audit = createAuditLogger(request);
+
   try {
     const body = await request.json();
     const { contactId } = body;
@@ -22,6 +25,8 @@ export async function POST(request: NextRequest) {
 
     await redisClient.setContactPause(contactId);
 
+    audit('PAUSE_CONTACT', 'pause', contactId);
+
     return NextResponse.json({
       success: true,
       contactId,
@@ -29,10 +34,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[Pause API] Error setting pause:', error);
-    return NextResponse.json(
-      { error: getErrorMessage(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -40,6 +42,8 @@ export async function POST(request: NextRequest) {
  * DELETE /api/pause?contactId={contactId} - Clear pause for contact
  */
 export async function DELETE(request: NextRequest) {
+  const audit = createAuditLogger(request);
+
   try {
     const { searchParams } = new URL(request.url);
     const contactId = searchParams.get('contactId');
@@ -50,16 +54,15 @@ export async function DELETE(request: NextRequest) {
 
     await redisClient.clearContactPause(contactId);
 
+    audit('RESUME_CONTACT', 'pause', contactId);
+
     return NextResponse.json({
       success: true,
       contactId,
     });
   } catch (error) {
     console.error('[Pause API] Error clearing pause:', error);
-    return NextResponse.json(
-      { error: getErrorMessage(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 

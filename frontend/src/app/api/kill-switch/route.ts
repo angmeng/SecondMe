@@ -6,17 +6,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
 import { getErrorMessage } from '@/lib/errors';
+import { createAuditLogger } from '@/lib/audit';
 
 /**
  * POST /api/kill-switch - Enable master kill switch (global pause)
  * Body: { duration?: number } - optional duration in seconds, 0 = indefinite
  */
 export async function POST(request: NextRequest) {
+  const audit = createAuditLogger(request);
+
   try {
     const body = await request.json();
     const { duration = 0 } = body;
 
     await redisClient.setGlobalPause(duration);
+
+    audit('ENABLE_KILL_SWITCH', 'kill-switch', undefined, { duration });
 
     return NextResponse.json({
       success: true,
@@ -27,10 +32,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('[Kill Switch API] Error enabling kill switch:', error);
-    return NextResponse.json(
-      { error: getErrorMessage(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -38,7 +40,9 @@ export async function POST(request: NextRequest) {
  * DELETE /api/kill-switch - Disable master kill switch (clear global pause)
  * Safety: Automatically pauses all contacts so user must enable them one by one
  */
-export async function DELETE(_request: NextRequest) {
+export async function DELETE(request: NextRequest) {
+  const audit = createAuditLogger(request);
+
   try {
     // Before clearing global pause, set individual pauses for all known contacts
     // This ensures no contact becomes active automatically - user must enable each manually
@@ -54,11 +58,15 @@ export async function DELETE(_request: NextRequest) {
         contacts.map((contact) => redisClient.setContactPause(contact.id, PAUSE_DURATION))
       );
 
-      console.log(`[Kill Switch API] Paused ${contacts.length} contacts before disabling global pause`);
+      console.log(
+        `[Kill Switch API] Paused ${contacts.length} contacts before disabling global pause`
+      );
     }
 
     // Now clear the global pause
     await redisClient.clearGlobalPause();
+
+    audit('DISABLE_KILL_SWITCH', 'kill-switch');
 
     return NextResponse.json({
       success: true,
@@ -68,10 +76,7 @@ export async function DELETE(_request: NextRequest) {
     });
   } catch (error) {
     console.error('[Kill Switch API] Error disabling kill switch:', error);
-    return NextResponse.json(
-      { error: getErrorMessage(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 

@@ -26,7 +26,10 @@ frontend/
 │   │       ├── persona/route.ts
 │   │       ├── metrics/route.ts
 │   │       ├── settings/route.ts
-│   │       └── session/route.ts
+│   │       ├── session/route.ts
+│   │       ├── channels/         # Channel management
+│   │       ├── skills/           # Skills API (proxy to orchestrator)
+│   │       └── pairing/          # Contact pairing/approval
 │   ├── components/             # React components
 │   │   ├── ui/                 # Base UI components
 │   │   │   ├── Avatar.tsx
@@ -267,12 +270,26 @@ module.exports = {
 | `/api/settings` | GET/PUT | Bot settings |
 | `/api/metrics` | GET | Performance metrics |
 | `/api/session` | GET | Session info |
+| `/api/channels` | GET | List all channels |
+| `/api/channels/[channelId]` | POST | Enable/disable channel (action: enable\|disable) |
+| `/api/skills` | GET | List all skills (proxy to orchestrator) |
+| `/api/skills/[skillId]` | GET | Get skill details |
+| `/api/skills/[skillId]` | POST | Enable skill |
+| `/api/skills/[skillId]` | DELETE | Disable skill |
+| `/api/skills/[skillId]` | PUT | Update skill config |
+| `/api/pairing` | GET | List pending pairing requests |
+| `/api/pairing/[contactId]` | POST | Approve contact |
+| `/api/pairing/[contactId]` | DELETE | Deny contact |
+| `/api/pairing/approved` | GET | List approved contacts |
+| `/api/pairing/approved/[contactId]` | PUT | Update contact tier |
+| `/api/pairing/approved/[contactId]` | DELETE | Revoke approval |
 
 ## Component Categories
 
 ### UI Components (`components/ui/`)
 Base-level, reusable components:
 - `Avatar` - User/contact avatars
+- `ChannelBadge` - Channel identifier badge (WhatsApp/Telegram)
 - `EmptyState` - Empty list placeholders
 - `Skeleton` - Loading skeletons
 - `StatusIndicator` - Connection/status dots
@@ -281,11 +298,15 @@ Base-level, reusable components:
 ### Feature Components (`components/`)
 Domain-specific components:
 - `BotStatus` - WhatsApp connection status
+- `ChannelStatusCard` - Single channel status display with toggle
+- `ChannelStatusGrid` - Grid of channel cards with real-time updates
 - `KillSwitch` - Global pause toggle
 - `QRCodeDisplay` - QR code canvas renderer
 - `ContactList` - Contact management list
 - `ConversationThread` - Chat history display
 - `PersonaEditor` - Persona configuration
+- `PairingRequests` - Pending contact approval requests
+- `ApprovedContacts` - Approved contacts management
 - `SleepHoursConfig` - Sleep hours settings
 - `MetricsDisplay` - Performance dashboard
 - `ActivityLog` - Recent activity feed

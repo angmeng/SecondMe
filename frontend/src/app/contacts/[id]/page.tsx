@@ -14,6 +14,7 @@ import { SkeletonCard } from '@/components/ui/Skeleton';
 import PersonaSelector from '@/components/PersonaSelector';
 import { socketClient } from '@/lib/socket';
 import { getErrorMessage } from '@/lib/errors';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 interface Contact {
   id: string;
@@ -123,13 +124,13 @@ export default function ConversationPage() {
     // Subscribe to new messages via Socket.io
     const socket = socketClient.getSocket();
 
-    socket.on('new_message', (data: { contactId: string; message: Message }) => {
+    socket.on(SOCKET_EVENTS.NEW_MESSAGE, (data: { contactId: string; message: Message }) => {
       if (data.contactId === contactId) {
         setMessages((prev) => [...prev, data.message]);
       }
     });
 
-    socket.on('message_status', (data: { messageId: string; status: Message['status'] }) => {
+    socket.on(SOCKET_EVENTS.MESSAGE_STATUS, (data: { messageId: string; status: Message['status'] }) => {
       setMessages((prev) =>
         prev.map((m) => (m.id === data.messageId ? { ...m, status: data.status } : m))
       );

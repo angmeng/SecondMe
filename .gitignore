@@ -39,6 +39,8 @@ Thumbs.db
 *~
 
 # WhatsApp Web.js session data
+.wwebjs_auth/
+.wwebjs_cache/
 services/gateway/.wwebjs_auth/
 services/gateway/.wwebjs_cache/
 

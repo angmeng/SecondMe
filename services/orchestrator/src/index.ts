@@ -18,6 +18,9 @@ import { automemClient } from './automem/client.js';
 import { buildWorkflow } from './langgraph/workflow.js';
 import { metricsCollector } from './metrics/collector.js';
 import { getReadyDeferredMessages } from './hts/index.js';
+import { skillRegistry, registerBuiltInSkills } from './skills/index.js';
+import { createLogger } from './utils/logger.js';
+import { startDocumentConsumer, stopDocumentConsumer, getDocumentProcessor } from './documents/index.js';
 
 const PORT = process.env['ORCHESTRATOR_PORT'] || 3002;
 const NODE_ENV = process.env['NODE_ENV'] || 'development';
@@ -97,13 +100,17 @@ async function startMessageConsumer() {
               `[Orchestrator] Processing message from ${payload.contactId}: ${payload.content}`
             );
 
-            // Build initial workflow state
+            // Build initial workflow state (including media fields from Phase 4)
             const initialState = {
               messageId: payload.messageId,
               contactId: payload.contactId,
               contactName: payload.contactName,
               content: payload.content,
               timestamp: payload.timestamp,
+              // Media fields (Phase 4)
+              mediaType: payload.type, // 'text', 'image', 'audio', 'video', 'document'
+              mediaBase64: payload.mediaBase64,
+              mediaMimeType: payload.mediaMimeType,
             };
 
             // Execute workflow
@@ -145,16 +152,37 @@ async function startOrchestratorService() {
     await redisClient.connect();
     console.log('[Orchestrator] Redis connected');
 
-    // Initialize AutoMem connection
+    // Initialize AutoMem connection (optional - service continues without it)
     console.log('[Orchestrator] Connecting to AutoMem...');
     await automemClient.connect();
-    console.log('[Orchestrator] AutoMem connected');
+    if (automemClient.connected) {
+      console.log('[Orchestrator] AutoMem connected');
+    } else {
+      console.log('[Orchestrator] AutoMem not available - memory features disabled');
+    }
 
     // Verify Anthropic API key
     if (!process.env['ANTHROPIC_API_KEY']) {
       throw new Error('ANTHROPIC_API_KEY environment variable not set');
     }
     console.log('[Orchestrator] Anthropic API key verified');
+
+    // Initialize skill registry
+    console.log('[Orchestrator] Initializing skill registry...');
+    const skillLogger = createLogger('Skills');
+    await skillRegistry.initialize(redisClient.client, {
+      info: (msg, meta) => skillLogger.info(msg, meta),
+      warn: (msg, meta) => skillLogger.warn(msg, meta),
+      error: (msg, meta) => skillLogger.error(msg, meta),
+      debug: (msg, meta) => skillLogger.debug(msg, meta),
+    });
+
+    // Register built-in skills
+    await registerBuiltInSkills();
+
+    // Load persisted state (enabled/disabled, configs)
+    await skillRegistry.loadState();
+    console.log(`[Orchestrator] Skill registry initialized with ${skillRegistry.listSkills().length} skills`);
 
     console.log('[Orchestrator] Workflow initialized');
 
@@ -182,6 +210,138 @@ async function startOrchestratorService() {
       }
     });
 
+    // Skills API endpoints
+    app.get('/skills', (_req: Request, res: Response) => {
+      try {
+        const skills = skillRegistry.listSkills();
+        res.json({ success: true, skills, count: skills.length });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to list skills',
+        });
+      }
+    });
+
+    app.get('/skills/:skillId', (req: Request, res: Response) => {
+      try {
+        const skillId = req.params['skillId'];
+        if (typeof skillId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid skill ID' });
+          return;
+        }
+        const skill = skillRegistry.getSkill(skillId);
+        if (!skill) {
+          res.status(404).json({ success: false, error: `Skill ${skillId} not found` });
+          return;
+        }
+        res.json({ success: true, skill });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get skill',
+        });
+      }
+    });
+
+    app.post('/skills/:skillId/enable', async (req: Request, res: Response) => {
+      try {
+        const skillId = req.params['skillId'];
+        if (typeof skillId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid skill ID' });
+          return;
+        }
+        const skill = skillRegistry.getSkill(skillId);
+        if (!skill) {
+          res.status(404).json({ success: false, error: `Skill ${skillId} not found` });
+          return;
+        }
+        await skillRegistry.enable(skillId);
+        res.json({ success: true, message: `Skill ${skillId} enabled` });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to enable skill',
+        });
+      }
+    });
+
+    app.post('/skills/:skillId/disable', async (req: Request, res: Response) => {
+      try {
+        const skillId = req.params['skillId'];
+        if (typeof skillId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid skill ID' });
+          return;
+        }
+        const skill = skillRegistry.getSkill(skillId);
+        if (!skill) {
+          res.status(404).json({ success: false, error: `Skill ${skillId} not found` });
+          return;
+        }
+        await skillRegistry.disable(skillId);
+        res.json({ success: true, message: `Skill ${skillId} disabled` });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to disable skill',
+        });
+      }
+    });
+
+    app.put('/skills/:skillId/config', async (req: Request, res: Response) => {
+      try {
+        const skillId = req.params['skillId'];
+        if (typeof skillId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid skill ID' });
+          return;
+        }
+        const skill = skillRegistry.getSkill(skillId);
+        if (!skill) {
+          res.status(404).json({ success: false, error: `Skill ${skillId} not found` });
+          return;
+        }
+        const { config } = req.body;
+        if (!config || typeof config !== 'object') {
+          res.status(400).json({ success: false, error: 'Invalid config object' });
+          return;
+        }
+        await skillRegistry.updateConfig(skillId, config);
+        const updatedConfig = skillRegistry.getConfig(skillId);
+        res.json({ success: true, message: `Skill ${skillId} config updated`, config: updatedConfig });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update skill config',
+        });
+      }
+    });
+
+    // Document delete endpoint (for AutoMem cleanup from frontend)
+    app.delete('/documents/:documentId', async (req: Request, res: Response) => {
+      try {
+        const documentId = req.params['documentId'];
+        if (typeof documentId !== 'string') {
+          res.status(400).json({ success: false, error: 'Invalid document ID' });
+          return;
+        }
+
+        const processor = getDocumentProcessor();
+        const deletedCount = await processor.deleteFromAutoMem(documentId);
+
+        res.json({
+          success: true,
+          documentId,
+          deletedChunks: deletedCount,
+          message: `Deleted ${deletedCount} chunks from AutoMem`,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete document',
+        });
+      }
+    });
+
     // Start HTTP server
     app.listen(PORT, () => {
       console.log(`[Orchestrator] HTTP server listening on port ${PORT}`);
@@ -197,6 +357,11 @@ async function startOrchestratorService() {
       console.error('[Orchestrator] Deferred message processor crashed:', error);
     });
 
+    // Start document queue consumer (for knowledge upload feature)
+    startDocumentConsumer().catch((error) => {
+      console.error('[Orchestrator] Document consumer crashed:', error);
+    });
+
     console.log(`[Orchestrator] Orchestrator service ready on port ${PORT}`);
   } catch (error) {
     console.error('[Orchestrator] Failed to start Orchestrator service:', error);
@@ -209,7 +374,8 @@ async function shutdown() {
   console.log('[Orchestrator] Shutting down gracefully...');
 
   try {
-    // Stop metrics publishing
+    // Stop consumers
+    stopDocumentConsumer();
     metricsCollector.stopPublishing();
 
     await redisClient.quit();

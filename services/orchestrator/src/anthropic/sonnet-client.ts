@@ -1,11 +1,13 @@
 /**
  * Anthropic Sonnet Client
  * Primary reasoning model with prompt caching for persona and context
+ * Phase 4: Added Claude Vision support for image understanding
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { type StyleProfile } from '../automem/recall.js';
 import { type ConversationMessage } from '../history/index.js';
+import type { ImageContent } from '@secondme/shared-types';
 
 const ANTHROPIC_API_KEY = process.env['ANTHROPIC_API_KEY'] || '';
 
@@ -66,22 +68,31 @@ class SonnetClient {
   /**
    * Generate contextual response with prompt caching for persona and graph context
    * Now supports conversation history for multi-turn context
+   * Phase 4: Added image support for Claude Vision
+   * Phase 7: Added owner knowledge context for personal document retrieval
    */
   async getContextualResponse(
     content: string,
     personaStyleGuide: string,
     graphContext: GraphContext,
     styleProfile?: StyleProfile | null,
-    conversationHistory?: ConversationMessage[]
+    conversationHistory?: ConversationMessage[],
+    images?: ImageContent[],
+    ownerKnowledgeContext?: string | null
   ): Promise<ContextualResponse> {
     try {
       const startTime = Date.now();
 
-      // Build cached system prompt with persona, graph schema, and style profile
-      const systemPrompt = this.buildCachedSystemPrompt(personaStyleGuide, graphContext, styleProfile);
+      // Build cached system prompt with persona, graph schema, style profile, and owner knowledge
+      const systemPrompt = this.buildCachedSystemPrompt(
+        personaStyleGuide,
+        graphContext,
+        styleProfile,
+        ownerKnowledgeContext
+      );
 
-      // Build messages array with conversation history
-      const messages = this.buildMessagesWithHistory(content, conversationHistory);
+      // Build messages array with conversation history and optional images
+      const messages = this.buildMessagesWithHistory(content, conversationHistory, images);
 
       const response = await this.client.messages.create({
         model: 'claude-sonnet-4-5',
@@ -102,8 +113,9 @@ class SonnetClient {
       const cacheReadTokens = usageWithCache.cache_read_input_tokens || 0;
       const cacheWriteTokens = usageWithCache.cache_creation_input_tokens || 0;
       const historyCount = conversationHistory?.length ?? 0;
+      const imageCount = images?.length ?? 0;
 
-      console.log(`[Sonnet Client] Contextual response generated (${latency}ms, ${tokensUsed} tokens, cache read: ${cacheReadTokens}, cache write: ${cacheWriteTokens}, history: ${historyCount} msgs)`);
+      console.log(`[Sonnet Client] Contextual response generated (${latency}ms, ${tokensUsed} tokens, cache read: ${cacheReadTokens}, cache write: ${cacheWriteTokens}, history: ${historyCount} msgs${imageCount > 0 ? `, images: ${imageCount}` : ''})`);
 
       return {
         response: responseText,
@@ -123,10 +135,13 @@ class SonnetClient {
    *
    * Merges consecutive same-role messages to comply with Claude API requirements
    * (messages must alternate between 'user' and 'assistant' roles)
+   *
+   * Phase 4: Added image support - images are included in the current message
    */
   private buildMessagesWithHistory(
     currentContent: string,
-    history?: ConversationMessage[]
+    history?: ConversationMessage[],
+    images?: ImageContent[]
   ): Anthropic.Messages.MessageParam[] {
     const messages: Anthropic.Messages.MessageParam[] = [];
 
@@ -148,15 +163,18 @@ class SonnetClient {
       }
     }
 
+    // Build current message content (text with optional images)
+    const currentMessageContent = this.buildUserContent(currentContent, images);
+
     // Add current message (merge if last history message was also 'user')
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage && lastMessage.role === 'user') {
-      // Merge current message with last user message
+    if (lastMessage && lastMessage.role === 'user' && !images?.length) {
+      // Merge current message with last user message (only if no images)
       lastMessage.content = `${lastMessage.content}\n${currentContent}`;
     } else {
       messages.push({
         role: 'user',
-        content: currentContent,
+        content: currentMessageContent,
       });
     }
 
@@ -164,12 +182,50 @@ class SonnetClient {
   }
 
   /**
-   * Build system prompt with caching for persona, context, and style profile
+   * Build user content with optional images
+   * Phase 4: Images are placed before text content
+   */
+  private buildUserContent(
+    textContent: string,
+    images?: ImageContent[]
+  ): Anthropic.Messages.ContentBlockParam[] | string {
+    // If no images, return simple string content
+    if (!images || images.length === 0) {
+      return textContent;
+    }
+
+    // Build content blocks with images first, then text
+    const contentBlocks: Anthropic.Messages.ContentBlockParam[] = [];
+
+    // Add images
+    for (const image of images) {
+      contentBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: image.source.media_type,
+          data: image.source.data,
+        },
+      });
+    }
+
+    // Add text content
+    contentBlocks.push({
+      type: 'text',
+      text: textContent,
+    });
+
+    return contentBlocks;
+  }
+
+  /**
+   * Build system prompt with caching for persona, context, style profile, and owner knowledge
    */
   private buildCachedSystemPrompt(
     personaStyleGuide: string,
     graphContext: GraphContext,
-    styleProfile?: StyleProfile | null
+    styleProfile?: StyleProfile | null,
+    ownerKnowledgeContext?: string | null
   ): Anthropic.Messages.TextBlockParam[] {
     // Format graph context as readable text
     const contextText = this.formatGraphContext(graphContext);
@@ -208,6 +264,16 @@ Use this context naturally in your response when relevant. Don't force it if it 
               type: 'text' as const,
               text: styleText,
               cache_control: { type: 'ephemeral' as const }, // Cache style profile
+            },
+          ]
+        : []),
+      // Owner knowledge block (from uploaded documents)
+      ...(ownerKnowledgeContext
+        ? [
+            {
+              type: 'text' as const,
+              text: `ABOUT ME (OWNER'S BACKGROUND):\n\n${ownerKnowledgeContext}\n\nUse this information when the contact asks about you, your background, skills, experience, or interests. Do not volunteer this information unless it's relevant to the conversation.`,
+              cache_control: { type: 'ephemeral' as const }, // Cache owner knowledge
             },
           ]
         : []),

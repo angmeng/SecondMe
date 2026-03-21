@@ -6,9 +6,11 @@
  * if the phone goes offline or the session is manually invalidated.
  */
 
-import { Client, WAState } from 'whatsapp-web.js';
+import { Client } from 'whatsapp-web.js';
+import type { WAState } from 'whatsapp-web.js';
 import { io } from '../index.js';
 import { redisClient } from '../redis/client.js';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 export interface SessionInfo {
   /** When the session was created */
@@ -196,7 +198,7 @@ export class SessionManager {
     console.log('[SessionManager] Initiating session refresh...');
 
     // Emit event to notify frontend
-    io.emit('session_refresh_required', {
+    io.emit(SOCKET_EVENTS.SESSION_REFRESH_REQUIRED, {
       reason: 'manual_refresh',
       timestamp: Date.now(),
     });
@@ -233,14 +235,14 @@ export class SessionManager {
       createdAt: Date.now(),
       lastVerifiedAt: Date.now(),
       estimatedExpiryAt: Date.now() + SESSION_DURATION_MS,
-      state: 'CONNECTED',
+      state: 'CONNECTED' as WAState,
       needsRefresh: false,
     };
 
     await this.saveSessionInfo();
     this.emitSessionUpdate();
 
-    io.emit('session_refreshed', {
+    io.emit(SOCKET_EVENTS.SESSION_REFRESHED, {
       timestamp: Date.now(),
       expiresAt: this.sessionInfo.estimatedExpiryAt,
     });
@@ -254,7 +256,7 @@ export class SessionManager {
 
     const timeRemaining = this.getTimeRemaining();
 
-    io.emit('session_update', {
+    io.emit(SOCKET_EVENTS.SESSION_UPDATE, {
       ...this.sessionInfo,
       timeRemaining,
       timestamp: Date.now(),
@@ -267,7 +269,7 @@ export class SessionManager {
   private emitExpiryWarning(): void {
     const timeRemaining = this.getTimeRemaining();
 
-    io.emit('session_expiry_warning', {
+    io.emit(SOCKET_EVENTS.SESSION_EXPIRY_WARNING, {
       hoursRemaining: timeRemaining.hours,
       minutesRemaining: timeRemaining.minutes,
       estimatedExpiryAt: this.sessionInfo?.estimatedExpiryAt,
@@ -279,7 +281,7 @@ export class SessionManager {
    * Emit session expired event
    */
   private emitSessionExpired(): void {
-    io.emit('session_expired', {
+    io.emit(SOCKET_EVENTS.SESSION_EXPIRED, {
       reason: 'Session disconnected or expired',
       timestamp: Date.now(),
     });
@@ -337,10 +339,10 @@ export class SessionManager {
 
     // If sessionInfo is not set yet or has unknown state, check client.info as fallback
     // This handles the race condition where getStatus is called before initialize() completes
-    let state = this.sessionInfo?.state || 'unknown';
+    let state: WAState | 'unknown' = this.sessionInfo?.state || 'unknown';
     if (state === 'unknown' && this.client.info) {
       // Client is connected but sessionInfo hasn't been updated yet
-      state = 'CONNECTED';
+      state = 'CONNECTED' as WAState;
     }
 
     return {

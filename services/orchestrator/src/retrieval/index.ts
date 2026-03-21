@@ -1,8 +1,11 @@
 /**
  * Retrieval Module
  * Exports for semantic RAG context retrieval
+ *
+ * Task 5.1.3: Enhanced with retrieval fusion for multiple sources
  */
 
+// Hybrid retriever (existing)
 export {
   retrieveContext,
   getSemanticRagConfig,
@@ -12,22 +15,12 @@ export {
   type SemanticRetrievalResult,
 } from './hybrid-retriever.js';
 
+// Retrieval fusion (Task 5.1.3)
 export {
-  searchRelevantTopics,
-  searchRelevantPeople,
-  searchRelevantEvents,
-  checkVectorIndexesExist,
-  type VectorSearchResult,
-  type ContactFilteredResult,
-} from './semantic-queries.js';
-
-export {
-  rerankResults,
-  selectTopResults,
-  rerankAndSelect,
-  mergeRankedResults,
-  logRetrievalStats,
-  type RerankWeights,
-  type RerankOptions,
-  type RankedResult,
-} from './reranker.js';
+  RetrievalFusion,
+  getRetrievalFusion,
+  isFusionEnabled,
+  type RetrievalFusionConfig,
+  type FusionResult,
+  type RetrievalSource,
+} from './fusion.js';

@@ -3,11 +3,18 @@
  * Handles connection to Redis for pub/sub, state management, and message queues
  */
 
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6380', 10);
-const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
+const REDIS_HOST = process.env['REDIS_HOST'] || 'localhost';
+const REDIS_PORT = parseInt(process.env['REDIS_PORT'] || '6380', 10);
+const REDIS_PASSWORD = process.env['REDIS_PASSWORD'];
+
+// Build base config, only including password if defined
+const baseConfig = {
+  host: REDIS_HOST,
+  port: REDIS_PORT,
+  ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
+};
 
 class RedisClient {
   public client: Redis;
@@ -17,10 +24,8 @@ class RedisClient {
   constructor() {
     // Main client for general operations
     this.client = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-      retryStrategy: (times) => {
+      ...baseConfig,
+      retryStrategy: (times: number) => {
         const delay = Math.min(times * 50, 2000);
         console.log(`[Gateway Redis] Retrying connection... (${times})`);
         return delay;
@@ -29,25 +34,17 @@ class RedisClient {
     });
 
     // Dedicated subscriber client for pub/sub
-    this.subscriber = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-    });
+    this.subscriber = new Redis(baseConfig);
 
     // Dedicated publisher client for pub/sub
-    this.publisher = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
-      password: REDIS_PASSWORD,
-    });
+    this.publisher = new Redis(baseConfig);
 
     // Event handlers
     this.client.on('connect', () => {
       console.log('[Gateway Redis] Connected to Redis');
     });
 
-    this.client.on('error', (err) => {
+    this.client.on('error', (err: Error) => {
       console.error('[Gateway Redis] Redis client error:', err);
     });
 
@@ -85,15 +82,14 @@ class RedisClient {
    * Subscribe to Redis pub/sub channel
    */
   async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
-    this.subscriber.subscribe(channel, (err, count) => {
-      if (err) {
-        console.error(`[Gateway Redis] Failed to subscribe to ${channel}:`, err);
-      } else {
-        console.log(`[Gateway Redis] Subscribed to ${channel} (${count} total)`);
-      }
-    });
+    try {
+      const count = await this.subscriber.subscribe(channel);
+      console.log(`[Gateway Redis] Subscribed to ${channel} (${count} total)`);
+    } catch (err) {
+      console.error(`[Gateway Redis] Failed to subscribe to ${channel}:`, err);
+    }
 
-    this.subscriber.on('message', (chan, msg) => {
+    this.subscriber.on('message', (chan: string, msg: string) => {
       if (chan === channel) {
         callback(msg);
       }
@@ -154,6 +150,7 @@ class RedisClient {
 
   /**
    * Queue message to Redis stream for Orchestrator to process
+   * Includes media fields for voice transcription and image understanding (Phase 4)
    */
   async queueMessage(messageData: {
     messageId: string;
@@ -163,6 +160,10 @@ class RedisClient {
     timestamp: number;
     hasMedia: boolean;
     type: string;
+    /** Base64-encoded media content (for voice/image processing) */
+    mediaBase64?: string;
+    /** MIME type of the media (e.g., 'audio/ogg', 'image/jpeg') */
+    mediaMimeType?: string;
   }): Promise<void> {
     const payload = JSON.stringify(messageData);
 
@@ -174,7 +175,11 @@ class RedisClient {
       payload
     );
 
-    console.log(`[Gateway Redis] Message queued: ${messageData.messageId}`);
+    // Log with media info if present
+    const mediaInfo = messageData.mediaBase64
+      ? ` (media: ${messageData.type}, ${Math.round((messageData.mediaBase64.length * 3) / 4 / 1024)}KB)`
+      : '';
+    console.log(`[Gateway Redis] Message queued: ${messageData.messageId}${mediaInfo}`);
   }
 
   /**
@@ -224,8 +229,10 @@ class RedisClient {
       for (const [id, fieldArray] of entries) {
         // fieldArray is ['payload', '{...}']
         const payloadJson = fieldArray[1];
-        const payload = JSON.parse(payloadJson);
-        responses.push({ id, payload });
+        if (payloadJson) {
+          const payload = JSON.parse(payloadJson);
+          responses.push({ id, payload });
+        }
       }
     }
 
