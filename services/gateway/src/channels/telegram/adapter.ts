@@ -11,6 +11,7 @@ import { BaseChannel } from '../base-channel.js';
 import type { MessageContent, SendResult, ChannelContact, DownloadedMedia } from '@secondme/shared-types';
 import type { ChannelDependencies, ChannelInitOptions } from '../types.js';
 import { normalizeTelegramContactId, isTelegramGroup } from './normalizer.js';
+import { getErrorMessage } from '../utils.js';
 
 /**
  * Configuration options for Telegram channel behavior
@@ -52,6 +53,29 @@ const MESSAGE_RETRY_CONFIG = {
   initialDelayMs: 1000,
   maxDelayMs: 30000,
   backoffMultiplier: 2,
+};
+
+/**
+ * MIME type lookup table for Telegram file paths (L7: hoisted from getMimeTypeFromPath)
+ */
+const MIME_TYPES: Record<string, string> = {
+  // Audio
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  // Image
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  // Video
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  // Document
+  pdf: 'application/pdf',
 };
 
 export class TelegramChannel extends BaseChannel {
@@ -111,6 +135,34 @@ export class TelegramChannel extends BaseChannel {
   }
 
   /**
+   * Shared handler for all incoming message types (M7).
+   * Applies the group-skip guard, caches the contact, then delegates
+   * message parameter construction to the caller-supplied extractor
+   * before emitting the normalised message.
+   *
+   * @param ctx - grammY context for the incoming update
+   * @param extractor - callback that returns createMessage() parameters from ctx
+   */
+  private async handleIncomingMessage(
+    ctx: Context,
+    extractor: (ctx: Context) => Parameters<typeof this.createMessage>[0] | null
+  ): Promise<void> {
+    if (this.config.skipGroups && ctx.chat && isTelegramGroup(ctx.chat.type)) {
+      return;
+    }
+
+    this.cacheContact(ctx);
+
+    const params = extractor(ctx);
+    if (params === null) {
+      return;
+    }
+
+    const message = this.createMessage(params);
+    await this.emitMessage(message);
+  }
+
+  /**
    * Set up message and command handlers on the bot
    */
   private setupBotHandlers(): void {
@@ -120,149 +172,111 @@ export class TelegramChannel extends BaseChannel {
     });
 
     // Handle text messages
-    this.bot.on('message:text', async (ctx) => {
-      // Skip groups if configured
-      if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) {
-        return;
-      }
-
-      // Cache contact info
-      this.cacheContact(ctx);
-
-      // Create normalized message using BaseChannel helper
-      const message = this.createMessage({
-        id: ctx.message.message_id.toString(),
-        contactId: normalizeTelegramContactId(ctx.from.id),
-        content: ctx.message.text,
-        timestamp: ctx.message.date * 1000, // Convert to milliseconds
+    this.bot.on('message:text', (ctx) =>
+      this.handleIncomingMessage(ctx, (c) => ({
+        id: c.message!.message_id.toString(),
+        contactId: normalizeTelegramContactId(c.from!.id),
+        content: (c.message as NonNullable<typeof c.message> & { text: string }).text,
+        timestamp: c.message!.date * 1000, // Convert to milliseconds
         metadata: {
-          chatId: ctx.chat.id,
-          firstName: ctx.from.first_name,
-          lastName: ctx.from.last_name,
-          username: ctx.from.username,
+          chatId: c.chat!.id,
+          firstName: c.from!.first_name,
+          lastName: c.from!.last_name,
+          username: c.from!.username,
         },
-      });
-
-      await this.emitMessage(message);
-    });
+      }))
+    );
 
     // Handle photo messages
-    this.bot.on('message:photo', async (ctx) => {
-      if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) {
-        return;
-      }
-
-      // Cache contact info
-      this.cacheContact(ctx);
-
-      const photos = ctx.message.photo;
-      // Photos array is always non-empty for message:photo events
-      // Get the largest (last) photo
-      const largestPhoto = photos[photos.length - 1];
-      if (!largestPhoto) {
-        return;
-      }
-
-      const message = this.createMessage({
-        id: ctx.message.message_id.toString(),
-        contactId: normalizeTelegramContactId(ctx.from.id),
-        content: ctx.message.caption || '[Photo]',
-        timestamp: ctx.message.date * 1000,
-        mediaType: 'image',
-        mediaUrl: largestPhoto.file_id, // Telegram file_id for later retrieval
-        metadata: {
-          chatId: ctx.chat.id,
-          firstName: ctx.from.first_name,
-          lastName: ctx.from.last_name,
-          username: ctx.from.username,
-        },
-      });
-
-      await this.emitMessage(message);
-    });
+    this.bot.on('message:photo', (ctx) =>
+      this.handleIncomingMessage(ctx, (c) => {
+        const photos = (c.message as NonNullable<typeof c.message> & { photo: { file_id: string }[] }).photo;
+        const largestPhoto = photos[photos.length - 1];
+        if (!largestPhoto) return null;
+        const msg = c.message as NonNullable<typeof c.message> & { caption?: string; photo: { file_id: string }[] };
+        return {
+          id: c.message!.message_id.toString(),
+          contactId: normalizeTelegramContactId(c.from!.id),
+          content: msg.caption || '[Photo]',
+          timestamp: c.message!.date * 1000,
+          mediaType: 'image' as const,
+          mediaUrl: largestPhoto.file_id, // Telegram file_id for later retrieval
+          metadata: {
+            chatId: c.chat!.id,
+            firstName: c.from!.first_name,
+            lastName: c.from!.last_name,
+            username: c.from!.username,
+          },
+        };
+      })
+    );
 
     // Handle voice messages
-    this.bot.on('message:voice', async (ctx) => {
-      if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) {
-        return;
-      }
-
-      // Cache contact info
-      this.cacheContact(ctx);
-
-      const message = this.createMessage({
-        id: ctx.message.message_id.toString(),
-        contactId: normalizeTelegramContactId(ctx.from.id),
-        content: '[Voice message]',
-        timestamp: ctx.message.date * 1000,
-        mediaType: 'audio',
-        mediaUrl: ctx.message.voice.file_id,
-        metadata: {
-          chatId: ctx.chat.id,
-          firstName: ctx.from.first_name,
-          duration: ctx.message.voice.duration,
-        },
-      });
-
-      await this.emitMessage(message);
-    });
+    this.bot.on('message:voice', (ctx) =>
+      this.handleIncomingMessage(ctx, (c) => {
+        const voice = (c.message as NonNullable<typeof c.message> & { voice: { file_id: string; duration: number } }).voice;
+        return {
+          id: c.message!.message_id.toString(),
+          contactId: normalizeTelegramContactId(c.from!.id),
+          content: '[Voice message]',
+          timestamp: c.message!.date * 1000,
+          mediaType: 'audio' as const,
+          mediaUrl: voice.file_id,
+          metadata: {
+            chatId: c.chat!.id,
+            firstName: c.from!.first_name,
+            duration: voice.duration,
+          },
+        };
+      })
+    );
 
     // Handle document messages
-    this.bot.on('message:document', async (ctx) => {
-      if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) {
-        return;
-      }
-
-      // Cache contact info
-      this.cacheContact(ctx);
-
-      const message = this.createMessage({
-        id: ctx.message.message_id.toString(),
-        contactId: normalizeTelegramContactId(ctx.from.id),
-        content: ctx.message.caption || `[Document: ${ctx.message.document.file_name || 'file'}]`,
-        timestamp: ctx.message.date * 1000,
-        mediaType: 'document',
-        mediaUrl: ctx.message.document.file_id,
-        metadata: {
-          chatId: ctx.chat.id,
-          firstName: ctx.from.first_name,
-          fileName: ctx.message.document.file_name,
-          mimeType: ctx.message.document.mime_type,
-        },
-      });
-
-      await this.emitMessage(message);
-    });
+    this.bot.on('message:document', (ctx) =>
+      this.handleIncomingMessage(ctx, (c) => {
+        const doc = (c.message as NonNullable<typeof c.message> & { document: { file_id: string; file_name?: string; mime_type?: string }; caption?: string }).document;
+        const caption = (c.message as NonNullable<typeof c.message> & { caption?: string }).caption;
+        return {
+          id: c.message!.message_id.toString(),
+          contactId: normalizeTelegramContactId(c.from!.id),
+          content: caption || `[Document: ${doc.file_name || 'file'}]`,
+          timestamp: c.message!.date * 1000,
+          mediaType: 'document' as const,
+          mediaUrl: doc.file_id,
+          metadata: {
+            chatId: c.chat!.id,
+            firstName: c.from!.first_name,
+            fileName: doc.file_name,
+            mimeType: doc.mime_type,
+          },
+        };
+      })
+    );
 
     // Handle video messages
-    this.bot.on('message:video', async (ctx) => {
-      if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) {
-        return;
-      }
-
-      // Cache contact info
-      this.cacheContact(ctx);
-
-      const message = this.createMessage({
-        id: ctx.message.message_id.toString(),
-        contactId: normalizeTelegramContactId(ctx.from.id),
-        content: ctx.message.caption || '[Video]',
-        timestamp: ctx.message.date * 1000,
-        mediaType: 'video',
-        mediaUrl: ctx.message.video.file_id,
-        metadata: {
-          chatId: ctx.chat.id,
-          firstName: ctx.from.first_name,
-          lastName: ctx.from.last_name,
-          username: ctx.from.username,
-          duration: ctx.message.video.duration,
-          width: ctx.message.video.width,
-          height: ctx.message.video.height,
-        },
-      });
-
-      await this.emitMessage(message);
-    });
+    this.bot.on('message:video', (ctx) =>
+      this.handleIncomingMessage(ctx, (c) => {
+        const video = (c.message as NonNullable<typeof c.message> & { video: { file_id: string; duration: number; width: number; height: number }; caption?: string }).video;
+        const caption = (c.message as NonNullable<typeof c.message> & { caption?: string }).caption;
+        return {
+          id: c.message!.message_id.toString(),
+          contactId: normalizeTelegramContactId(c.from!.id),
+          content: caption || '[Video]',
+          timestamp: c.message!.date * 1000,
+          mediaType: 'video' as const,
+          mediaUrl: video.file_id,
+          metadata: {
+            chatId: c.chat!.id,
+            firstName: c.from!.first_name,
+            lastName: c.from!.last_name,
+            username: c.from!.username,
+            duration: video.duration,
+            width: video.width,
+            height: video.height,
+          },
+        };
+      })
+    );
 
     // Handle bot errors
     this.bot.catch((err) => {
@@ -294,7 +308,7 @@ export class TelegramChannel extends BaseChannel {
 
       // Handle polling errors
       this.pollingPromise.catch((error) => {
-        const message = error instanceof Error ? error.message : 'Polling error';
+        const message = getErrorMessage(error);
         this.logger.error('Telegram bot polling error', {
           channelId: this.id,
           error: message,
@@ -302,7 +316,7 @@ export class TelegramChannel extends BaseChannel {
         this.setStatus('error', message);
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = getErrorMessage(error);
       this.setStatus('error', message);
       throw error;
     }
@@ -321,7 +335,7 @@ export class TelegramChannel extends BaseChannel {
     } catch (error) {
       this.logger.error('Error stopping Telegram bot', {
         channelId: this.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       // Still mark as disconnected
       this.contactCache.clear();
@@ -341,8 +355,44 @@ export class TelegramChannel extends BaseChannel {
       const chatId = this.extractChatId(to);
       return this.sendMessageWithRetry(chatId, content.text, to, 0);
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Invalid contact ID';
-      return { success: false, error: errorMsg };
+      return { success: false, error: getErrorMessage(error) };
+    }
+  }
+
+  /**
+   * Generic retry wrapper for send operations (M8).
+   * Delegates retry scheduling to retryMessageSend when the error is
+   * a 429 rate-limit or another retryable network failure.
+   *
+   * @param operation - factory that produces the next attempt's promise
+   * @param attempt - zero-based current attempt index
+   * @param operationType - label used in log messages (e.g. 'sendMessage')
+   * @param to - contact ID used in log messages
+   */
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    attempt: number,
+    operationType: string,
+    to: string
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      const isRetryable =
+        (this.is429Error(error) || this.isRetryableError(error)) &&
+        attempt < MESSAGE_RETRY_CONFIG.maxRetries;
+
+      if (isRetryable) {
+        return this.retryMessageSend(
+          () => this.withRetry(operation, attempt + 1, operationType, to),
+          error,
+          attempt,
+          operationType,
+          to
+        );
+      }
+
+      throw error;
     }
   }
 
@@ -356,33 +406,15 @@ export class TelegramChannel extends BaseChannel {
     attempt: number
   ): Promise<SendResult> {
     try {
-      const result = await this.bot.api.sendMessage(chatId, text);
+      const result = await this.withRetry<{ message_id: number }>(
+        () => this.bot.api.sendMessage(chatId, text),
+        attempt,
+        'sendMessage',
+        to
+      );
       return { success: true, messageId: result.message_id.toString() };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Send failed';
-
-      // Check if this is a rate limit error (429)
-      if (this.is429Error(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
-        return this.retryMessageSend(
-          () => this.sendMessageWithRetry(chatId, text, to, attempt + 1),
-          error,
-          attempt,
-          'sendMessage',
-          to
-        );
-      }
-
-      // Check if this is another retryable error
-      if (this.isRetryableError(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
-        return this.retryMessageSend(
-          () => this.sendMessageWithRetry(chatId, text, to, attempt + 1),
-          error,
-          attempt,
-          'sendMessage',
-          to
-        );
-      }
-
+      const errorMsg = getErrorMessage(error);
       this.logger.error('Failed to send Telegram message', {
         channelId: this.id,
         to,
@@ -405,7 +437,7 @@ export class TelegramChannel extends BaseChannel {
       this.logger.debug('Error sending Telegram typing indicator', {
         channelId: this.id,
         to,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -433,8 +465,7 @@ export class TelegramChannel extends BaseChannel {
 
       return this.sendVoiceWithRetry(chatId, buffer, ext, to, 0);
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Invalid contact ID';
-      return { success: false, error: errorMsg };
+      return { success: false, error: getErrorMessage(error) };
     }
   }
 
@@ -449,11 +480,14 @@ export class TelegramChannel extends BaseChannel {
     attempt: number
   ): Promise<SendResult> {
     try {
-      // Create InputFile from buffer (recreate each attempt to avoid stream issues)
-      const inputFile = new InputFile(buffer, `voice.${ext}`);
-
-      // Send as voice note
-      const result = await this.bot.api.sendVoice(chatId, inputFile);
+      // InputFile is recreated inside the operation lambda on each attempt
+      // to avoid stream-reuse issues.
+      const result = await this.withRetry<{ message_id: number }>(
+        () => this.bot.api.sendVoice(chatId, new InputFile(buffer, `voice.${ext}`)),
+        attempt,
+        'sendVoice',
+        to
+      );
 
       this.logger.info('Voice message sent', {
         channelId: this.id,
@@ -464,30 +498,7 @@ export class TelegramChannel extends BaseChannel {
 
       return { success: true, messageId: result.message_id.toString() };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Voice send failed';
-
-      // Check if this is a rate limit error (429)
-      if (this.is429Error(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
-        return this.retryMessageSend(
-          () => this.sendVoiceWithRetry(chatId, buffer, ext, to, attempt + 1),
-          error,
-          attempt,
-          'sendVoice',
-          to
-        );
-      }
-
-      // Check if this is another retryable error
-      if (this.isRetryableError(error) && attempt < MESSAGE_RETRY_CONFIG.maxRetries) {
-        return this.retryMessageSend(
-          () => this.sendVoiceWithRetry(chatId, buffer, ext, to, attempt + 1),
-          error,
-          attempt,
-          'sendVoice',
-          to
-        );
-      }
-
+      const errorMsg = getErrorMessage(error);
       this.logger.error('Failed to send Telegram voice message', {
         channelId: this.id,
         to,
@@ -602,14 +613,14 @@ export class TelegramChannel extends BaseChannel {
         return this.retryDownload(
           fileId,
           attempt,
-          error instanceof Error ? error.message : 'Unknown error'
+          getErrorMessage(error)
         );
       }
 
       this.logger.error('Failed to download Telegram media', {
         channelId: this.id,
         fileId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
         attempt: attempt + 1,
       });
       return null;
@@ -711,7 +722,7 @@ export class TelegramChannel extends BaseChannel {
       attempt: nextAttempt,
       maxRetries: MESSAGE_RETRY_CONFIG.maxRetries,
       delayMs: delay,
-      reason: error instanceof Error ? error.message : String(error),
+      reason: getErrorMessage(error),
       is429: this.is429Error(error),
     });
 
@@ -746,32 +757,12 @@ export class TelegramChannel extends BaseChannel {
   }
 
   /**
-   * Determine MIME type from Telegram file path
+   * Determine MIME type from Telegram file path.
+   * Uses the module-level MIME_TYPES constant (L7).
    */
   private getMimeTypeFromPath(filePath: string): string {
     const ext = filePath.split('.').pop()?.toLowerCase();
-
-    const mimeTypes: Record<string, string> = {
-      // Audio
-      ogg: 'audio/ogg',
-      oga: 'audio/ogg',
-      mp3: 'audio/mpeg',
-      m4a: 'audio/mp4',
-      wav: 'audio/wav',
-      // Image
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      png: 'image/png',
-      gif: 'image/gif',
-      webp: 'image/webp',
-      // Video
-      mp4: 'video/mp4',
-      webm: 'video/webm',
-      // Document
-      pdf: 'application/pdf',
-    };
-
-    return mimeTypes[ext || ''] || 'application/octet-stream';
+    return MIME_TYPES[ext || ''] || 'application/octet-stream';
   }
 
   // --- Private Methods ---

@@ -3,6 +3,16 @@
  * Type-safe error handling for catch blocks and API responses
  */
 
+import type { ContactTier } from '@secondme/shared-types';
+
+/**
+ * Validate that a value is a legal ContactTier string.
+ * Acts as a type guard so callers can safely cast to ContactTier after checking.
+ */
+export function isValidTier(tier: string): tier is ContactTier {
+  return tier === 'trusted' || tier === 'standard' || tier === 'restricted';
+}
+
 /**
  * Extract a human-readable message from any error type
  */

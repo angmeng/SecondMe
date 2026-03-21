@@ -178,16 +178,33 @@ class RedisClient {
 
   /**
    * Get all paused contacts
+   * Uses SCAN-based iteration to avoid blocking Redis (O(N) KEYS is unsafe in production)
    */
   async getAllPausedContacts(): Promise<string[]> {
     await this.ensureConnected();
 
-    const keys = await this.client.keys('PAUSE:*');
+    const contactIds: string[] = [];
+    let cursor = '0';
 
-    // Filter out PAUSE:ALL and extract contact IDs
-    return keys
-      .filter((key) => key !== 'PAUSE:ALL')
-      .map((key) => key.replace('PAUSE:', ''));
+    do {
+      const [nextCursor, keys] = await this.client.scan(
+        cursor,
+        'MATCH',
+        'PAUSE:*',
+        'COUNT',
+        100
+      );
+      cursor = nextCursor;
+
+      for (const key of keys) {
+        // Filter out the global kill switch key; extract contact ID from the rest
+        if (key !== 'PAUSE:ALL') {
+          contactIds.push(key.replace('PAUSE:', ''));
+        }
+      }
+    } while (cursor !== '0');
+
+    return contactIds;
   }
 
   /**
@@ -350,7 +367,7 @@ class RedisClient {
           if (json) {
             try {
               const parsed = JSON.parse(json);
-              // Basic validation - check for contactId and status (code field was removed in simplified implementation)
+              // Basic validation - check for contactId and status
               if (parsed && parsed.contactId && parsed.status === 'pending') {
                 requests.push(parsed as PairingRequest);
               }

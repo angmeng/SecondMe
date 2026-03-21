@@ -17,6 +17,7 @@ import type {
   ManagedChannelInfo,
 } from '@secondme/shared-types';
 import type { ChannelLogger } from './types.js';
+import { getErrorMessage } from './utils.js';
 
 // Re-export for convenience
 export type { ManagedChannelInfo } from '@secondme/shared-types';
@@ -84,7 +85,7 @@ export class ChannelManager {
       } catch (error) {
         this.deps.logger.error(`Error disconnecting channel during unregister: ${channelId}`, {
           channelId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -137,7 +138,7 @@ export class ChannelManager {
     } catch (error) {
       this.deps.logger.error(`Failed to connect channel during enable: ${channelId}`, {
         channelId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       // Channel remains enabled but in error state
       // The status will reflect the error
@@ -172,7 +173,7 @@ export class ChannelManager {
       } catch (error) {
         this.deps.logger.error(`Error disconnecting channel during disable: ${channelId}`, {
           channelId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -270,7 +271,7 @@ export class ChannelManager {
         } catch (error) {
           this.deps.logger.error(`Failed to connect channel: ${channel.id}`, {
             channelId: channel.id,
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
           });
           throw error;
         }
@@ -310,7 +311,7 @@ export class ChannelManager {
           } catch (error) {
             this.deps.logger.error(`Error disconnecting channel: ${channel.id}`, {
               channelId: channel.id,
-              error: error instanceof Error ? error.message : String(error),
+              error: getErrorMessage(error),
             });
           }
         }

@@ -18,6 +18,7 @@ import { DEFAULT_MEDIA_LIMITS } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
 import type { ChannelLogger } from './types.js';
+import { getErrorMessage } from './utils.js';
 
 /**
  * Maximum payload size for Redis queue (in bytes of base64 data)
@@ -167,11 +168,11 @@ export class GatewayMessageProcessor {
    * @returns Result indicating how the message was handled
    */
   async processMessage(message: ChannelMessage, contactName?: string): Promise<ProcessResult> {
-    const { contactId, content, id: messageId, timestamp, channelId, normalizedContactId } = message;
+    const { contactId, channelId, normalizedContactId } = message;
 
     this.deps.logger.info(`Processing message from ${maskContactId(contactId)}`, {
       contactId: maskContactId(contactId),
-      messageId,
+      messageId: message.id,
       channelId,
     });
 
@@ -191,7 +192,7 @@ export class GatewayMessageProcessor {
       } catch (error) {
         // Log but don't fail - linking is non-critical
         this.deps.logger.warn(`Failed to link contact ${maskContactId(contactId)}`, {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -231,6 +232,26 @@ export class GatewayMessageProcessor {
       return this.handleUnapprovedContact(message, contactName);
     }
 
+    return this.processApprovedMessage(message, contactName);
+  }
+
+  /**
+   * Execute steps 2-6 of the pipeline for an already-approved contact:
+   * store in history, check pause, check rate limit, download media,
+   * queue for orchestrator, and emit the message_received event.
+   *
+   * @param message - The channel message to process
+   * @param contactName - Optional display name of the contact
+   * @param autoApproved - When true, marks the result as auto_approved instead of queued
+   * @returns Result indicating how the message was handled
+   */
+  private async processApprovedMessage(
+    message: ChannelMessage,
+    contactName?: string,
+    autoApproved = false
+  ): Promise<ProcessResult> {
+    const { contactId, content, id: messageId, timestamp, channelId } = message;
+
     // STEP 2: Store in history (only for approved contacts)
     await this.deps.historyStore.addMessage(contactId, {
       id: messageId,
@@ -247,7 +268,7 @@ export class GatewayMessageProcessor {
         contactId: maskContactId(contactId),
         channelId,
       });
-      return { processed: true, reason: 'paused' };
+      return { processed: true, reason: 'paused', ...(autoApproved && { autoApproved: true }) };
     }
 
     // STEP 4: Rate limit check
@@ -262,7 +283,11 @@ export class GatewayMessageProcessor {
           threshold: rateLimitResult.threshold,
         }
       );
-      return { processed: true, reason: 'rate_limited' };
+      return {
+        processed: true,
+        reason: 'rate_limited',
+        ...(autoApproved && { autoApproved: true }),
+      };
     }
 
     // STEP 5: Download media if present (Phase 4)
@@ -319,7 +344,7 @@ export class GatewayMessageProcessor {
         this.deps.logger.warn(`Failed to download media for ${maskContactId(contactId)}`, {
           contactId: maskContactId(contactId),
           channelId,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     }
@@ -361,7 +386,9 @@ export class GatewayMessageProcessor {
       preview: content.substring(0, 50),
     });
 
-    return { processed: true, reason: 'queued' };
+    return autoApproved
+      ? { processed: true, reason: 'auto_approved', autoApproved: true }
+      : { processed: true, reason: 'queued' };
   }
 
   /**
@@ -449,7 +476,7 @@ export class GatewayMessageProcessor {
     message: ChannelMessage,
     contactName?: string
   ): Promise<ProcessResult> {
-    const { contactId, content, id: messageId, timestamp, channelId } = message;
+    const { contactId, content, channelId } = message;
 
     // Check if denied (cooling off period)
     const isDenied = await this.deps.pairingStore.isDenied(contactId);
@@ -477,84 +504,8 @@ export class GatewayMessageProcessor {
         // Auto-approve with 'standard' tier
         await this.deps.pairingStore.approveContact(contactId, 'system:auto-approve', 'standard');
 
-        // Now process the message normally
-        // Store in history
-        await this.deps.historyStore.addMessage(contactId, {
-          id: messageId,
-          role: 'user',
-          content,
-          timestamp,
-          type: 'incoming',
-        });
-
-        // Check pause state
-        const isPaused = await this.deps.redisClient.isPaused(contactId);
-        if (isPaused) {
-          return { processed: true, reason: 'paused', autoApproved: true };
-        }
-
-        // Check rate limit
-        const rateLimitResult = await this.deps.rateLimiter.check(contactId, { channelId });
-        if (!rateLimitResult.allowed) {
-          return { processed: true, reason: 'rate_limited', autoApproved: true };
-        }
-
-        // Download media if present (Phase 4)
-        let autoMediaBase64: string | undefined;
-        let autoMediaMimeType: string | undefined;
-
-        const hasAutoMedia = message.mediaType !== undefined && message.mediaType !== 'text';
-        if (hasAutoMedia && message.mediaUrl && this.deps.downloadMedia) {
-          try {
-            const downloaded = await this.deps.downloadMedia(channelId, message.mediaUrl);
-            if (downloaded) {
-              // Size validation for auto-approved contacts too
-              const estimatedPayloadSize = downloaded.base64.length;
-              const exceedsQueueLimit = estimatedPayloadSize > MAX_QUEUE_PAYLOAD_SIZE_BYTES;
-              const exceedsProcessingLimit =
-                downloaded.sizeBytes &&
-                downloaded.sizeBytes > DEFAULT_MEDIA_LIMITS.maxFileSizeBytes;
-
-              if (!exceedsQueueLimit && !exceedsProcessingLimit) {
-                autoMediaBase64 = downloaded.base64;
-                autoMediaMimeType = downloaded.mimeType;
-              }
-            }
-          } catch {
-            // Log silently - message can still be processed without media
-          }
-        }
-
-        // Queue for orchestrator (build payload with only defined optional fields)
-        const autoPayload: Parameters<RedisClientInterface['queueMessage']>[0] = {
-          messageId,
-          contactId,
-          contactName: contactName || 'Unknown',
-          content,
-          timestamp,
-          hasMedia: hasAutoMedia,
-          type: message.mediaType || 'text',
-        };
-
-        if (autoMediaBase64) {
-          autoPayload.mediaBase64 = autoMediaBase64;
-        }
-        if (autoMediaMimeType) {
-          autoPayload.mediaMimeType = autoMediaMimeType;
-        }
-
-        await this.deps.redisClient.queueMessage(autoPayload);
-
-        // Emit message received event
-        this.deps.emitEvent('message_received', {
-          channelId,
-          contactId,
-          contactName: contactName || 'Unknown',
-          timestamp,
-          preview: content.substring(0, 50),
-        });
-
-        return { processed: true, reason: 'auto_approved', autoApproved: true };
+        // Run steps 2-6 of the pipeline and return with autoApproved flag
+        return this.processApprovedMessage(message, contactName, true);
       }
     }
 
@@ -599,7 +550,7 @@ export class GatewayMessageProcessor {
           this.deps.logger.error(`Failed to send auto-reply to ${maskContactId(contactId)}`, {
             contactId: maskContactId(contactId),
             channelId,
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
           });
         }
       }

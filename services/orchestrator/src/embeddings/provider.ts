@@ -126,27 +126,83 @@ export abstract class EmbeddingProvider {
 
   /**
    * Embed multiple texts in a batch
+   * Cache is checked per-text before calling the API; uncached results are stored after.
    */
   async embedBatch(texts: string[]): Promise<BatchEmbeddingResult> {
     if (texts.length === 0) {
       return { embeddings: [], tokensUsed: 0 };
     }
 
-    // Check circuit breaker
+    // Check cache for each text first
+    const cacheKeys = texts.map((t) => this.getCacheKey(t));
+    let cachedValues: (string | null)[] = [];
+    try {
+      cachedValues = await redisClient.client.mget(cacheKeys);
+    } catch (error) {
+      console.warn(`[${this.name}] Batch cache read error:`, error);
+      cachedValues = texts.map(() => null);
+    }
+
+    // Separate texts that hit the cache from those that need an API call
+    const resultEmbeddings: (number[] | null)[] = texts.map(() => null);
+    const uncachedIndices: number[] = [];
+
+    for (let i = 0; i < texts.length; i++) {
+      const cached = cachedValues[i];
+      if (cached) {
+        try {
+          resultEmbeddings[i] = JSON.parse(cached) as number[];
+        } catch {
+          uncachedIndices.push(i);
+        }
+      } else {
+        uncachedIndices.push(i);
+      }
+    }
+
+    const cacheHits = texts.length - uncachedIndices.length;
+    if (cacheHits > 0) {
+      console.log(`[${this.name}] Batch cache: ${cacheHits}/${texts.length} hits`);
+    }
+
+    // If everything was cached, return immediately without touching the API
+    if (uncachedIndices.length === 0) {
+      return {
+        embeddings: resultEmbeddings as number[][],
+        tokensUsed: 0,
+      };
+    }
+
+    // Check circuit breaker before hitting the API
     if (!this.checkCircuitBreaker()) {
       throw new Error(`${this.name} circuit breaker is open`);
     }
 
+    const uncachedTexts = uncachedIndices.map((i) => texts[i]!);
+
     const startTime = Date.now();
     try {
-      const result = await this.embedMultiple(texts);
+      const result = await this.embedMultiple(uncachedTexts);
       const latency = Date.now() - startTime;
-      console.log(`[${this.name}] Batch embedding of ${texts.length} texts in ${latency}ms (${result.tokensUsed} tokens)`);
+      console.log(
+        `[${this.name}] Batch embedding of ${uncachedTexts.length} texts in ${latency}ms (${result.tokensUsed} tokens)`
+      );
 
       // Record success
       this.recordSuccess();
 
-      return result;
+      // Merge API results back into the full result array and cache them
+      for (let j = 0; j < uncachedIndices.length; j++) {
+        const originalIndex = uncachedIndices[j]!;
+        const embedding = result.embeddings[j]!;
+        resultEmbeddings[originalIndex] = embedding;
+        await this.cacheEmbedding(cacheKeys[originalIndex]!, embedding);
+      }
+
+      return {
+        embeddings: resultEmbeddings as number[][],
+        tokensUsed: result.tokensUsed,
+      };
     } catch (error) {
       this.recordFailure();
       throw error;

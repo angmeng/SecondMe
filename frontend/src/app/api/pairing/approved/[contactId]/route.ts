@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { redisClient } from '@/lib/redis-client';
-import { getErrorMessage } from '@/lib/errors';
+import { getErrorMessage, isValidTier } from '@/lib/errors';
 import { createAuditLogger } from '@/lib/audit';
 import type { ContactTier } from '@secondme/shared-types';
 
@@ -26,7 +26,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const { tier } = body as { tier: ContactTier };
 
     // Validate tier
-    if (!['trusted', 'standard', 'restricted'].includes(tier)) {
+    if (!isValidTier(tier)) {
       return NextResponse.json(
         { error: 'Invalid tier. Must be trusted, standard, or restricted' },
         { status: 400 }

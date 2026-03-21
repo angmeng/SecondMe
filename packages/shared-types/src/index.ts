@@ -126,6 +126,20 @@ export {
   isVoicePreference,
 } from './media.js';
 
+// Shared pairing operations (CRUD functions + key helpers + Redis interface)
+export type { PairingRedisClient } from './pairing-ops.js';
+export {
+  PAIRING_KEYS,
+  listPendingRequests,
+  listApprovedContacts,
+  getPendingRequest,
+  getApprovedContact,
+  approveContact,
+  denyContact,
+  revokeApproval,
+  updateContactTier,
+} from './pairing-ops.js';
+
 // Document types (Personal Knowledge Upload)
 export type {
   DocumentCategory,

@@ -25,6 +25,7 @@ import type {
 } from '@secondme/shared-types';
 import type { ChannelDependencies, ChannelInitOptions } from '../types.js';
 import { normalizeWhatsAppContactId, isGroupChat, isStatusBroadcast } from './normalizer.js';
+import { getErrorMessage } from '../utils.js';
 
 // Import existing WhatsApp singleton and classes
 // These are dynamically imported to allow for testing with mocks
@@ -164,7 +165,7 @@ export class WhatsAppChannel extends BaseChannel {
     } catch (error) {
       this.logger.error('Error disconnecting WhatsApp', {
         channelId: this.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       // Still mark as disconnected even if cleanup failed
       this.stopCacheCleanupInterval();
@@ -256,7 +257,7 @@ export class WhatsAppChannel extends BaseChannel {
       this.logger.debug('Failed to send typing indicator', {
         channelId: this.id,
         to,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -338,7 +339,7 @@ export class WhatsAppChannel extends BaseChannel {
     } catch (error) {
       this.logger.error('Failed to get contacts', {
         channelId: this.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return [];
     }
@@ -370,7 +371,7 @@ export class WhatsAppChannel extends BaseChannel {
       this.logger.debug('Failed to get contact', {
         channelId: this.id,
         id,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return null;
     }
@@ -443,7 +444,7 @@ export class WhatsAppChannel extends BaseChannel {
       this.logger.error('Failed to download media', {
         channelId: this.id,
         messageId,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
       return null;
     }
@@ -528,7 +529,7 @@ export class WhatsAppChannel extends BaseChannel {
         this.logger.error('Error handling incoming message', {
           channelId: this.id,
           messageId: message.id._serialized,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         });
       }
     };

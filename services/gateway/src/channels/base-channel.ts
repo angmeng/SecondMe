@@ -20,6 +20,7 @@ import type {
   ChannelLogger,
 } from './types.js';
 import { DEFAULT_CHANNEL_INIT_OPTIONS } from './types.js';
+import { getErrorMessage } from './utils.js';
 
 /**
  * Abstract base class for channel implementations
@@ -73,7 +74,7 @@ export abstract class BaseChannel implements Channel {
         } catch (err) {
           this.logger.error('Error in status handler', {
             channelId: this.id,
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           });
         }
       }
@@ -146,7 +147,7 @@ export abstract class BaseChannel implements Channel {
         this.logger.error('Error in message handler', {
           channelId: this.id,
           messageId: msg.id,
-          error: err instanceof Error ? err.message : String(err),
+          error: getErrorMessage(err),
         });
       }
     }

@@ -145,25 +145,7 @@ class DocumentStore {
 
     if (documentIds.length === 0) return [];
 
-    // Batch get all documents
-    const keys = documentIds.map((id) => KEYS.metadata(id));
-    const values = await client.mget(keys);
-
-    const documents: UploadedDocument[] = [];
-    for (const json of values) {
-      if (json) {
-        try {
-          const parsed: unknown = JSON.parse(json);
-          if (isUploadedDocument(parsed)) {
-            documents.push(parsed);
-          }
-        } catch {
-          // Skip invalid entries
-        }
-      }
-    }
-
-    return documents;
+    return this.fetchDocuments(documentIds);
   }
 
   /**
@@ -294,8 +276,19 @@ class DocumentStore {
 
     if (idsWithScores.length === 0) return [];
 
-    // Batch get all documents
-    const keys = idsWithScores.map((item) => KEYS.metadata(item.id));
+    return this.fetchDocuments(idsWithScores.map((item) => item.id));
+  }
+
+  /**
+   * Batch-fetch and parse UploadedDocument records from Redis by document ID.
+   * Skips any keys whose values are missing or fail JSON/type validation.
+   *
+   * @param documentIds - Ordered list of document IDs to fetch
+   * @returns Validated UploadedDocument array in the same relative order
+   */
+  private async fetchDocuments(documentIds: string[]): Promise<UploadedDocument[]> {
+    const client = redisClient.client;
+    const keys = documentIds.map((id) => KEYS.metadata(id));
     const values = await client.mget(keys);
 
     const documents: UploadedDocument[] = [];

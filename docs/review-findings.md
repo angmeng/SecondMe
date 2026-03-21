@@ -25,81 +25,27 @@ Reviewers: 3 parallel agents (code reuse, code quality, efficiency)
 
 ## Remaining Issues
 
-### H1: Pairing CRUD duplicated between gateway and frontend (HIGH)
+| ID | Issue | Status |
+|----|-------|--------|
+| L2 | Event names as raw string literals across services (`'events:pause'`, `'message_received'`, etc.) | Deferred — low impact, high churn |
+| L9 | WHAT-not-WHY comments throughout the diff | Deferred — subjective, fix incrementally |
 
-**Files:**
-- `services/gateway/src/redis/pairing-store.ts` — `PairingStore` class (lines 132-520)
-- `frontend/src/lib/redis-client.ts` — `RedisClient` class (lines 325-557)
+All other issues have been resolved (see Completed Fixes above).
 
-**Details:** 8 near-identical methods duplicated:
+## Recently Completed Fixes
 
-| Gateway `PairingStore` | Frontend `RedisClient` |
-|---|---|
-| `listPending()` | `listPendingPairingRequests()` |
-| `listApproved()` | `listApprovedContacts()` |
-| `getPendingRequest()` | `getPendingRequest()` |
-| `getApprovedContact()` | `getApprovedContact()` |
-| `approveContact()` | `approveContact()` |
-| `denyContact()` | `denyContact()` |
-| `revokeApproval()` | `revokeApproval()` |
-| `updateTier()` | `updateContactTier()` |
-
-Both use the same SCAN+MGET+parse+sort pattern. Gateway version uses type guards from `@secondme/shared-types`; frontend skips them.
-
-**Suggested fix:** Extract shared pairing module to `packages/shared-types` or a new `packages/pairing` package. Both services import and use the same implementation.
-
----
-
-### M1: `handleUnapprovedContact` duplicates media+queue pipeline (MEDIUM)
-
-**File:** `services/gateway/src/channels/message-processor.ts`
-
-**Details:** `handleUnapprovedContact` auto-approve path (lines ~480-556) duplicates the entire steps 2-6 pipeline from `processMessage` (lines ~234-363): history store, pause check, rate limit, media download, size validation, queue submission. After auto-approval, it should call back into the main pipeline instead.
-
-**Suggested fix:** Extract a private method like `processApprovedMessage(contactId, message, channelId)` covering steps 2-6. Call it from both `processMessage` (after pairing gate passes) and `handleUnapprovedContact` (after auto-approve).
-
----
-
-### M7: Telegram adapter — 5 message handlers repeat identical boilerplate (MEDIUM)
-
-**File:** `services/gateway/src/channels/telegram/adapter.ts` (lines ~116-258)
-
-**Details:** Five handlers (`message:text`, `message:photo`, `message:voice`, `message:document`, `message:video`) each repeat:
-```typescript
-if (this.config.skipGroups && isTelegramGroup(ctx.chat.type)) { return; }
-this.cacheContact(ctx);
-// ... create message with nearly identical structure
-this.emitMessage(message);
-```
-
-The only variation is media type, content extraction, and metadata fields.
-
-**Suggested fix:** Create a single `handleMessage(ctx, mediaType, extractor)` dispatcher that does the guard+cache preamble and delegates only the type-specific field extraction to a callback or config object.
-
----
-
-### M8: `sendMessageWithRetry` and `sendVoiceWithRetry` share identical retry logic (MEDIUM)
-
-**File:** `services/gateway/src/channels/telegram/adapter.ts`
-
-**Details:** Both methods share nearly identical retry logic checking `is429Error`, `isRetryableError`, and calling `retryMessageSend`. The exponential backoff and max-retry handling is duplicated.
-
-**Suggested fix:** Extract a generic `withRetry<T>(operation: () => Promise<T>, config)` method that both send methods call.
-
----
-
-### Low Priority (L1-L11)
-
-| ID | Issue | File(s) |
-|----|-------|---------|
-| L1 | `error instanceof Error ? error.message : String(error)` repeated ~30 times in gateway channels | `services/gateway/src/channels/**/*.ts` |
-| L2 | Event names as raw string literals across services (`'events:pause'`, `'message_received'`, etc.) | Multiple gateway files |
-| L3 | Redis key prefixes as raw strings in frontend (gateway has `KEYS` constants) | `frontend/src/lib/redis-client.ts` |
-| L4 | Frontend pairing doesn't use existing type guards from shared-types (`isPairingRequest`, `isApprovedContact`) | `frontend/src/lib/redis-client.ts:354,397` |
-| L5 | `getAllPausedContacts` uses `KEYS` command instead of `SCAN` | `frontend/src/lib/redis-client.ts:185` |
-| L6 | `pairing-store.ts` uses `console.log` instead of structured logger | `services/gateway/src/redis/pairing-store.ts` |
-| L7 | `mimeTypes` object recreated on every call in Telegram adapter | `services/gateway/src/channels/telegram/adapter.ts:getMimeTypeFromPath()` |
-| L8 | `embedBatch` skips cache check (only `embed()` caches) | `services/orchestrator/src/embeddings/provider.ts:130` |
-| L9 | WHAT-not-WHY comments throughout the diff | Various files |
-| L10 | Tier validation duplicated in 2 pairing route handlers | `frontend/src/app/api/pairing/[contactId]/route.ts:29`, `pairing/approved/[contactId]/route.ts:29` |
-| L11 | `document-store.ts` duplicated batch-fetch-and-parse logic in `list()` and `listByStatus()` | `frontend/src/lib/document-store.ts` |
+| ID | Issue | Fix |
+|----|-------|-----|
+| H1 | Pairing CRUD duplicated between gateway and frontend (8 methods). | Created `packages/shared-types/src/pairing-ops.ts` with `PAIRING_KEYS` + 8 shared functions. Both gateway `PairingStore` and frontend `RedisClient` delegate to shared module. Also fixes L3 (key constants) and L4 (type guards). |
+| M1 | `handleUnapprovedContact` duplicates media+queue pipeline (steps 2-6). | Extracted `processApprovedMessage()` in `message-processor.ts`. Both `processMessage` and `handleUnapprovedContact` delegate to it. |
+| M7 | 5 Telegram message handlers repeat identical boilerplate. | Consolidated into `handleIncomingMessage(ctx, extractor)` dispatcher. Each handler now passes only type-specific field extraction. |
+| M8 | `sendMessageWithRetry` and `sendVoiceWithRetry` share identical retry logic. | Extracted generic `withRetry<T>()` method used by both send methods. |
+| L1 | `error instanceof Error ? error.message : String(error)` repeated ~30 times. | Created `getErrorMessage()` in `services/gateway/src/channels/utils.ts`. Replaced 28 occurrences across 5 channel files. |
+| L3 | Redis key prefixes as raw strings in frontend. | Fixed via H1 — frontend now uses `PAIRING_KEYS` from shared module. |
+| L4 | Frontend pairing skips type guards. | Fixed via H1 — shared functions use `isPairingRequest`/`isApprovedContact`. |
+| L5 | `getAllPausedContacts` uses blocking `KEYS` command. | Replaced with SCAN-based iteration in `frontend/src/lib/redis-client.ts`. |
+| L6 | `pairing-store.ts` uses `console.log` instead of structured logger. | Replaced with `createLogger('PairingStore')` from gateway utils. |
+| L7 | `mimeTypes` object recreated on every call. | Hoisted to module-level `MIME_TYPES` constant in Telegram adapter. |
+| L8 | `embedBatch` skips cache check. | Added Redis `mget` cache lookup before API call; caches results after. |
+| L10 | Tier validation duplicated in 2 route handlers. | Extracted `isValidTier()` type guard to `frontend/src/lib/errors.ts`. |
+| L11 | `document-store.ts` duplicates batch-fetch-and-parse logic. | Extracted `fetchDocuments()` private method used by both `list()` and `listByStatus()`. |

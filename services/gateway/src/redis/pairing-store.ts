@@ -16,6 +16,7 @@
  */
 
 import { redisClient } from './client.js';
+import { createLogger } from '../utils/logger.js';
 import {
   type PairingRequest,
   type ApprovedContact,
@@ -24,11 +25,18 @@ import {
   type ContactTier,
   type CreatePairingResult,
   DEFAULT_PAIRING_CONFIG,
-  isPairingRequest,
-  isApprovedContact,
   parseIntEnv,
   extractPhoneFromContactId,
+  PAIRING_KEYS,
+  listPendingRequests,
+  listApprovedContacts,
+  getPendingRequest as sharedGetPendingRequest,
+  getApprovedContact as sharedGetApprovedContact,
+  revokeApproval as sharedRevokeApproval,
+  updateContactTier as sharedUpdateContactTier,
 } from '@secondme/shared-types';
+
+const logger = createLogger('PairingStore');
 
 /**
  * Configuration from environment with defaults
@@ -47,15 +55,6 @@ const PAIRING_CONFIG: PairingConfig = {
   autoReplyUnknown: process.env['PAIRING_AUTO_REPLY_UNKNOWN'] === 'true',
   autoReplyMessage:
     process.env['PAIRING_AUTO_REPLY_MESSAGE'] || DEFAULT_PAIRING_CONFIG.autoReplyMessage,
-};
-
-/**
- * Redis key helpers
- */
-const KEYS = {
-  pending: (contactId: string) => `PAIRING:pending:${contactId}`,
-  approved: (contactId: string) => `PAIRING:approved:${contactId}`,
-  denied: (contactId: string) => `PAIRING:denied:${contactId}`,
 };
 
 /**
@@ -220,18 +219,18 @@ class PairingStore {
     const result = (await this.runScript(
       CREATE_PAIRING_SCRIPT,
       3,
-      KEYS.approved(contactId),
-      KEYS.denied(contactId),
-      KEYS.pending(contactId),
+      PAIRING_KEYS.approved(contactId),
+      PAIRING_KEYS.denied(contactId),
+      PAIRING_KEYS.pending(contactId),
       JSON.stringify(request)
     )) as [number, string];
 
     if (result[0] === 1) {
-      console.log(`[Pairing Store] Created pairing request for ${contactId}`);
+      logger.info(`Created pairing request for ${contactId}`);
       return { success: true, request };
     } else {
-      console.log(
-        `[Pairing Store] Pairing request not created for ${contactId}: ${result[1]}`
+      logger.info(
+        `Pairing request not created for ${contactId}: ${result[1]}`
       );
       return {
         success: false,
@@ -244,7 +243,7 @@ class PairingStore {
    * Check if a contact is approved
    */
   async isApproved(contactId: string): Promise<boolean> {
-    const exists = await redisClient.client.exists(KEYS.approved(contactId));
+    const exists = await redisClient.client.exists(PAIRING_KEYS.approved(contactId));
     return exists === 1;
   }
 
@@ -252,48 +251,24 @@ class PairingStore {
    * Check if a contact is denied (in cooldown period)
    */
   async isDenied(contactId: string): Promise<boolean> {
-    const exists = await redisClient.client.exists(KEYS.denied(contactId));
+    const exists = await redisClient.client.exists(PAIRING_KEYS.denied(contactId));
     return exists === 1;
   }
 
   /**
-   * Get pending pairing request for a contact
+   * Get pending pairing request for a contact.
+   * Delegates to the shared implementation (includes type-guard validation).
    */
   async getPendingRequest(contactId: string): Promise<PairingRequest | null> {
-    const json = await redisClient.client.get(KEYS.pending(contactId));
-    if (!json) return null;
-
-    try {
-      const parsed: unknown = JSON.parse(json);
-      if (isPairingRequest(parsed)) {
-        return parsed;
-      }
-      console.error(`[Pairing Store] Invalid pending request structure for ${contactId}`);
-      return null;
-    } catch (error) {
-      console.error(`[Pairing Store] Error parsing pending request for ${contactId}:`, error);
-      return null;
-    }
+    return sharedGetPendingRequest(redisClient.client, contactId);
   }
 
   /**
-   * Get approved contact record
+   * Get approved contact record.
+   * Delegates to the shared implementation (includes type-guard validation).
    */
   async getApprovedContact(contactId: string): Promise<ApprovedContact | null> {
-    const json = await redisClient.client.get(KEYS.approved(contactId));
-    if (!json) return null;
-
-    try {
-      const parsed: unknown = JSON.parse(json);
-      if (isApprovedContact(parsed)) {
-        return parsed;
-      }
-      console.error(`[Pairing Store] Invalid approved contact structure for ${contactId}`);
-      return null;
-    } catch (error) {
-      console.error(`[Pairing Store] Error parsing approved contact for ${contactId}:`, error);
-      return null;
-    }
+    return sharedGetApprovedContact(redisClient.client, contactId);
   }
 
   /**
@@ -311,7 +286,7 @@ class PairingStore {
     const now = Date.now();
     const approved: ApprovedContact = {
       contactId,
-      phoneNumber: pending?.phoneNumber || this.extractPhoneNumber(contactId),
+      phoneNumber: pending?.phoneNumber ?? this.extractPhoneNumber(contactId),
       ...(pending?.displayName !== undefined && { displayName: pending.displayName }),
       ...(pending?.profilePicUrl !== undefined && { profilePicUrl: pending.profilePicUrl }),
       ...(pending?.channelId !== undefined && { channelId: pending.channelId }),
@@ -324,12 +299,12 @@ class PairingStore {
     await this.runScript(
       APPROVE_CONTACT_SCRIPT,
       2,
-      KEYS.approved(contactId),
-      KEYS.pending(contactId),
+      PAIRING_KEYS.approved(contactId),
+      PAIRING_KEYS.pending(contactId),
       JSON.stringify(approved)
     );
 
-    console.log(`[Pairing Store] Contact ${contactId} approved by ${approvedBy} (tier: ${tier})`);
+    logger.info(`Contact ${contactId} approved by ${approvedBy} (tier: ${tier})`);
 
     // Publish event for real-time updates
     await redisClient.publish(
@@ -358,7 +333,7 @@ class PairingStore {
 
     const denied: DeniedContact = {
       contactId,
-      phoneNumber: pending?.phoneNumber || this.extractPhoneNumber(contactId),
+      phoneNumber: pending?.phoneNumber ?? this.extractPhoneNumber(contactId),
       ...(pending?.displayName !== undefined && { displayName: pending.displayName }),
       deniedAt: now,
       deniedBy,
@@ -369,14 +344,14 @@ class PairingStore {
     await this.runScript(
       DENY_CONTACT_SCRIPT,
       2,
-      KEYS.denied(contactId),
-      KEYS.pending(contactId),
+      PAIRING_KEYS.denied(contactId),
+      PAIRING_KEYS.pending(contactId),
       JSON.stringify(denied),
       ttlSeconds.toString()
     );
 
-    console.log(
-      `[Pairing Store] Contact ${contactId} denied by ${deniedBy} (cooldown: ${this.config.denialCooldownHours}h)`
+    logger.info(
+      `Contact ${contactId} denied by ${deniedBy} (cooldown: ${this.config.denialCooldownHours}h)`
     );
 
     // Publish event
@@ -393,12 +368,14 @@ class PairingStore {
   }
 
   /**
-   * Revoke approval (admin action)
+   * Revoke approval (admin action).
+   * Delegates key deletion to the shared implementation, then publishes a
+   * real-time event.
    */
   async revokeApproval(contactId: string): Promise<void> {
-    await redisClient.client.del(KEYS.approved(contactId));
+    await sharedRevokeApproval(redisClient.client, contactId);
 
-    console.log(`[Pairing Store] Approval revoked for ${contactId}`);
+    logger.info(`Approval revoked for ${contactId}`);
 
     // Publish event
     await redisClient.publish(
@@ -412,97 +389,30 @@ class PairingStore {
   }
 
   /**
-   * List pending pairing requests
+   * List pending pairing requests.
+   * Delegates to the shared implementation.
    */
   async listPending(limit: number = 100): Promise<PairingRequest[]> {
-    // Use SCAN to find pending keys
-    const requests: PairingRequest[] = [];
-    let cursor = '0';
-
-    do {
-      const [nextCursor, keys] = await redisClient.client.scan(
-        cursor,
-        'MATCH',
-        'PAIRING:pending:*',
-        'COUNT',
-        100
-      );
-      cursor = nextCursor;
-
-      if (keys.length > 0) {
-        const values = await redisClient.client.mget(keys);
-        for (const json of values) {
-          if (json) {
-            try {
-              const parsed: unknown = JSON.parse(json);
-              if (isPairingRequest(parsed)) {
-                requests.push(parsed);
-              }
-            } catch {
-              // Skip invalid entries
-            }
-          }
-        }
-      }
-
-      if (requests.length >= limit) break;
-    } while (cursor !== '0');
-
-    // Sort by requestedAt descending (newest first)
-    return requests.slice(0, limit).sort((a, b) => b.requestedAt - a.requestedAt);
+    return listPendingRequests(redisClient.client, limit);
   }
 
   /**
-   * List approved contacts
+   * List approved contacts.
+   * Delegates to the shared implementation.
    */
   async listApproved(limit: number = 1000): Promise<ApprovedContact[]> {
-    const contacts: ApprovedContact[] = [];
-    let cursor = '0';
-
-    do {
-      const [nextCursor, keys] = await redisClient.client.scan(
-        cursor,
-        'MATCH',
-        'PAIRING:approved:*',
-        'COUNT',
-        100
-      );
-      cursor = nextCursor;
-
-      if (keys.length > 0) {
-        const values = await redisClient.client.mget(keys);
-        for (const json of values) {
-          if (json) {
-            try {
-              const parsed: unknown = JSON.parse(json);
-              if (isApprovedContact(parsed)) {
-                contacts.push(parsed);
-              }
-            } catch {
-              // Skip invalid entries
-            }
-          }
-        }
-      }
-
-      if (contacts.length >= limit) break;
-    } while (cursor !== '0');
-
-    // Sort by approvedAt descending (newest first)
-    return contacts.slice(0, limit).sort((a, b) => b.approvedAt - a.approvedAt);
+    return listApprovedContacts(redisClient.client, limit);
   }
 
   /**
-   * Update approved contact tier
+   * Update approved contact tier.
+   * Delegates to the shared implementation.
    */
   async updateTier(contactId: string, tier: ContactTier): Promise<ApprovedContact | null> {
-    const contact = await this.getApprovedContact(contactId);
-    if (!contact) return null;
-
-    contact.tier = tier;
-    await redisClient.client.set(KEYS.approved(contactId), JSON.stringify(contact));
-
-    console.log(`[Pairing Store] Updated tier for ${contactId} to ${tier}`);
+    const contact = await sharedUpdateContactTier(redisClient.client, contactId, tier);
+    if (contact) {
+      logger.info(`Updated tier for ${contactId} to ${tier}`);
+    }
     return contact;
   }
 
