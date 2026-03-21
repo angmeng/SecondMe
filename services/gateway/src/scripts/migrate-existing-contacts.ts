@@ -13,7 +13,7 @@
 import 'dotenv/config';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import Redis from 'ioredis';
-import { type ApprovedContact } from '@secondme/shared-types';
+import { type ApprovedContact, extractPhoneFromContactId } from '@secondme/shared-types';
 
 // Redis client type - using generic interface for migration script
 interface RedisInstance {
@@ -78,7 +78,7 @@ async function isAlreadyApproved(redis: RedisInstance, contactId: string): Promi
  * Extract phone number from contactId
  */
 function extractPhoneNumber(contactId: string): string {
-  return contactId.replace('@c.us', '').replace('@s.whatsapp.net', '');
+  return extractPhoneFromContactId(contactId);
 }
 
 /**

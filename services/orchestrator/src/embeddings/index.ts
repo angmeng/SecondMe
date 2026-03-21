@@ -36,13 +36,3 @@ export {
   embedTexts,
 } from './registry.js';
 
-// Backward compatibility - legacy voyage-client exports
-export {
-  embedMessage,
-  embedBatch,
-  formatEntityForEmbedding,
-  isVoyageConfigured,
-  getEmbeddingDimension,
-  getCircuitBreakerStatus,
-  resetCircuitBreaker,
-} from './voyage-client.js';

@@ -85,21 +85,20 @@ export class DocumentProcessor {
         PROCESSING_CONFIG.factExtractionConcurrency
       );
 
-      // Store chunks in AutoMem
+      // Store chunks in AutoMem (with concurrency limit to avoid overwhelming the API)
       let totalFacts = 0;
-      for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i]!;
+      const storePromises = chunks.map((chunk, i) => {
         const facts = factsMap.get(i) || [];
         totalFacts += facts.length;
+        return () =>
+          this.storeChunkInAutoMem(chunk, facts, documentId, originalName, category, chunks.length);
+      });
 
-        await this.storeChunkInAutoMem(
-          chunk,
-          facts,
-          documentId,
-          originalName,
-          category,
-          chunks.length
-        );
+      // Process in batches of 5 concurrent stores
+      const STORE_CONCURRENCY = 5;
+      for (let i = 0; i < storePromises.length; i += STORE_CONCURRENCY) {
+        const batch = storePromises.slice(i, i + STORE_CONCURRENCY);
+        await Promise.all(batch.map((fn) => fn()));
       }
 
       console.log(

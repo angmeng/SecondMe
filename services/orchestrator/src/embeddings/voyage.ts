@@ -6,14 +6,12 @@
  * Optimized for RAG applications.
  */
 
-import { createHash } from 'crypto';
 import {
   EmbeddingProvider,
   type EmbeddingProviderConfig,
   type EmbeddingResult,
   type BatchEmbeddingResult,
 } from './provider.js';
-import { redisClient } from '../redis/client.js';
 
 const VOYAGE_API_KEY = process.env['VOYAGE_API_KEY'];
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
@@ -59,6 +57,7 @@ export class VoyageEmbeddings extends EmbeddingProvider {
 
   private apiKey: string | undefined;
   private defaultInputType: VoyageInputType;
+  private currentInputType: VoyageInputType | undefined;
 
   constructor(config: VoyageEmbeddingConfig = {}) {
     super(config);
@@ -77,8 +76,9 @@ export class VoyageEmbeddings extends EmbeddingProvider {
    * Embed a single text using Voyage API (called by parent's embed() which handles caching)
    */
   protected async embedSingle(text: string): Promise<EmbeddingResult> {
-    // Parent's embed() already handles caching, so we just call the API directly
-    return this.callVoyageApi(text, this.defaultInputType);
+    // Parent's embed() already handles caching, so we just call the API directly.
+    // Use currentInputType if set by embedWithType(), otherwise default.
+    return this.callVoyageApi(text, this.currentInputType || this.defaultInputType);
   }
 
   /**
@@ -127,53 +127,29 @@ export class VoyageEmbeddings extends EmbeddingProvider {
   }
 
   /**
-   * Generate type-aware cache key for Voyage embeddings
-   * Different input types produce different embeddings, so we include it in the key
+   * Override cache key to include inputType when embedWithType is active.
+   * Different input types produce different embeddings from the same text.
    */
-  private getTypedCacheKey(text: string, inputType: VoyageInputType): string {
-    const hash = createHash('sha256').update(text).digest('hex').substring(0, 16);
-    return `EMB:voyage:${inputType}:${hash}`;
+  protected override getCacheKey(text: string): string {
+    if (this.currentInputType) {
+      return `EMB:voyage:${this.currentInputType}:${this.hashText(text)}`;
+    }
+    return super.getCacheKey(text);
   }
 
   /**
-   * Embed with specific input type (with type-aware caching)
-   * Use this method when you need to specify query vs document input type
+   * Embed with specific input type (with type-aware caching).
+   * Delegates to the base class embed() flow but temporarily overrides
+   * the cache key to include inputType, since different input types
+   * produce different embeddings from the same text.
    */
   async embedWithType(text: string, inputType: VoyageInputType): Promise<EmbeddingResult> {
-    // Check cache first with type-aware key
-    const cacheKey = this.getTypedCacheKey(text, inputType);
-
+    // Store current inputType so embedSingle and getCacheKey can use it
+    this.currentInputType = inputType;
     try {
-      const cached = await redisClient.client.get(cacheKey);
-      if (cached) {
-        console.log(`[Voyage] Cache hit for ${inputType} embedding`);
-        return {
-          embedding: JSON.parse(cached),
-          fromCache: true,
-          tokensUsed: 0,
-        };
-      }
-    } catch (error) {
-      console.warn('[Voyage] Cache read error:', error);
-    }
-
-    // Check circuit breaker
-    if (!this.checkCircuitBreaker()) {
-      throw new Error('Voyage API circuit breaker is open');
-    }
-
-    try {
-      const result = await this.callVoyageApi(text, inputType);
-
-      this.recordSuccess();
-
-      // Cache the embedding with type-aware key
-      await this.cacheEmbedding(cacheKey, result.embedding);
-
-      return result;
-    } catch (error) {
-      this.recordFailure();
-      throw error;
+      return await this.embed(text);
+    } finally {
+      this.currentInputType = undefined;
     }
   }
 

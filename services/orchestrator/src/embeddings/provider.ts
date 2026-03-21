@@ -164,11 +164,17 @@ export abstract class EmbeddingProvider {
   protected abstract embedMultiple(texts: string[]): Promise<BatchEmbeddingResult>;
 
   /**
+   * Generate a short SHA256 hash of text content (first 16 hex chars)
+   */
+  protected hashText(text: string): string {
+    return createHash('sha256').update(text).digest('hex').substring(0, 16);
+  }
+
+  /**
    * Generate cache key from text content
    */
   protected getCacheKey(text: string): string {
-    const hash = createHash('sha256').update(text).digest('hex').substring(0, 16);
-    return `EMB:${this.name.toLowerCase()}:${hash}`;
+    return `EMB:${this.name.toLowerCase()}:${this.hashText(text)}`;
   }
 
   /**

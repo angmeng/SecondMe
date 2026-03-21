@@ -134,29 +134,26 @@ interface TokenUsageLog {
 async function checkPauseNode(state: WorkflowState): Promise<Partial<WorkflowState>> {
   console.log(`[Workflow] Checking pause state for ${state.contactId}...`);
 
-  // Check global pause
-  const globalPause = await redisClient.client.exists('PAUSE:ALL');
+  // Check both pause keys in a single round-trip
+  const pipeline = redisClient.client.pipeline();
+  pipeline.exists('PAUSE:ALL');
+  pipeline.exists(`PAUSE:${state.contactId}`);
+  const results = await pipeline.exec();
+
+  const globalPause = results?.[0]?.[1] as number;
+  const contactPause = results?.[1]?.[1] as number;
+
   if (globalPause) {
     console.log('[Workflow] Global pause active, skipping message');
-    return {
-      isPaused: true,
-      pauseReason: 'global',
-    };
+    return { isPaused: true, pauseReason: 'global' };
   }
 
-  // Check contact-specific pause (key exists = paused, indefinite duration)
-  const contactPause = await redisClient.client.exists(`PAUSE:${state.contactId}`);
   if (contactPause === 1) {
     console.log(`[Workflow] Contact pause active for ${state.contactId}, skipping message`);
-    return {
-      isPaused: true,
-      pauseReason: 'contact',
-    };
+    return { isPaused: true, pauseReason: 'contact' };
   }
 
-  return {
-    isPaused: false,
-  };
+  return { isPaused: false };
 }
 
 /**
