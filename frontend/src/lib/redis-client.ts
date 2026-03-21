@@ -85,10 +85,8 @@ class RedisClient {
     await this.ensureConnected();
 
     if (duration > 0) {
-      // Set with TTL (in seconds)
       await this.client.setex('PAUSE:ALL', duration, Date.now().toString());
     } else {
-      // Set without TTL (indefinite pause)
       await this.client.set('PAUSE:ALL', Date.now().toString());
     }
 
@@ -119,7 +117,6 @@ class RedisClient {
   async setContactPause(contactId: string, _duration?: number): Promise<void> {
     await this.ensureConnected();
 
-    // Set pause without TTL - contact stays paused until manually unpaused
     await this.client.set(
       `PAUSE:${contactId}`,
       JSON.stringify({
@@ -146,11 +143,9 @@ class RedisClient {
   async isContactPaused(contactId: string): Promise<boolean> {
     await this.ensureConnected();
 
-    // Check global pause first
     const globalPause = await this.isGlobalPauseActive();
     if (globalPause) return true;
 
-    // Check contact-specific pause (key exists = paused)
     const contactPause = await this.client.exists(`PAUSE:${contactId}`);
     return contactPause === 1;
   }
@@ -197,7 +192,6 @@ class RedisClient {
       cursor = nextCursor;
 
       for (const key of keys) {
-        // Filter out the global kill switch key; extract contact ID from the rest
         if (key !== 'PAUSE:ALL') {
           contactIds.push(key.replace('PAUSE:', ''));
         }
@@ -276,7 +270,6 @@ class RedisClient {
       return { isSleeping: false };
     }
 
-    // Apply timezone offset to get local time
     const now = new Date();
     const localTime = new Date(now.getTime() + config.timezoneOffset * 60 * 60 * 1000);
     const currentHour = localTime.getUTCHours();
@@ -288,7 +281,6 @@ class RedisClient {
 
     let isSleeping: boolean;
 
-    // Handle sleep period crossing midnight
     if (sleepStartMinutes > sleepEndMinutes) {
       isSleeping = currentTotalMinutes >= sleepStartMinutes || currentTotalMinutes < sleepEndMinutes;
     } else {

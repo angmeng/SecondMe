@@ -12,6 +12,7 @@ import type {
   SendResult,
   ChannelContact,
 } from '@secondme/shared-types';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 import type {
   MessageHandler,
   StatusHandler,
@@ -80,7 +81,7 @@ export abstract class BaseChannel implements Channel {
       }
 
       // Emit socket event
-      this.deps.emitEvent('channel_status', {
+      this.deps.emitEvent(SOCKET_EVENTS.CHANNEL_STATUS, {
         channelId: this.id,
         status,
         error,

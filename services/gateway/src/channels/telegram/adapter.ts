@@ -56,7 +56,7 @@ const MESSAGE_RETRY_CONFIG = {
 };
 
 /**
- * MIME type lookup table for Telegram file paths (L7: hoisted from getMimeTypeFromPath)
+ * MIME type lookup table for Telegram file paths
  */
 const MIME_TYPES: Record<string, string> = {
   // Audio
@@ -97,7 +97,6 @@ export class TelegramChannel extends BaseChannel {
   ) {
     super(deps, options);
 
-    // Validate token format (must contain ':')
     if (!config.botToken || !config.botToken.includes(':')) {
       throw new Error(
         'Invalid Telegram bot token format. Token should be in format: 123456789:ABCdefGHI...'
@@ -306,7 +305,6 @@ export class TelegramChannel extends BaseChannel {
         },
       });
 
-      // Handle polling errors
       this.pollingPromise.catch((error) => {
         const message = getErrorMessage(error);
         this.logger.error('Telegram bot polling error', {
@@ -460,7 +458,7 @@ export class TelegramChannel extends BaseChannel {
       // Convert base64 to Buffer
       const buffer = Buffer.from(audio.base64, 'base64');
 
-      // Match filename extension to actual MIME type
+      // InputFile requires a file extension matching the MIME type
       const ext = audio.mimeType === 'audio/mpeg' ? 'mp3' : 'ogg';
 
       return this.sendVoiceWithRetry(chatId, buffer, ext, to, 0);

@@ -32,6 +32,7 @@ import {
   type ChannelLogger,
 } from './channels/index.js';
 import type { DownloadedMedia } from '@secondme/shared-types';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 import { ContactLinker } from './contact-linking/index.js';
 import express from 'express';
 
@@ -282,7 +283,7 @@ io.on('connection', (socket) => {
 
   // Send current connection status on connect
   // Use whatsappClient.isReady() as primary source of truth
-  socket.emit('connection_status', {
+  socket.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
     status: whatsappClient.isReady() ? 'ready' : 'disconnected',
     timestamp: Date.now(),
   });
@@ -290,7 +291,7 @@ io.on('connection', (socket) => {
   // Send current session info on connect (if sessionManager is initialized)
   if (sessionManager) {
     const sessionStatus = sessionManager.getStatus();
-    socket.emit('session_update', {
+    socket.emit(SOCKET_EVENTS.SESSION_UPDATE, {
       ...sessionStatus,
       state: sessionStatus.state,
       needsRefresh: sessionStatus.needsRefresh,
@@ -402,7 +403,7 @@ async function startResponseConsumer() {
               });
 
               // Emit message sent event
-              io.emit('message_sent', {
+              io.emit(SOCKET_EVENTS.MESSAGE_SENT, {
                 contactId,
                 messageId: result.messageId,
                 timestamp: Date.now(),
@@ -413,7 +414,7 @@ async function startResponseConsumer() {
               console.error(`[Gateway] Failed to send response to ${contactId}: ${result.error}`);
 
               // Emit message failed event
-              io.emit('message_failed', {
+              io.emit(SOCKET_EVENTS.MESSAGE_FAILED, {
                 contactId,
                 error: result.error,
                 timestamp: Date.now(),

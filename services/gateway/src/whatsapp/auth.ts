@@ -5,6 +5,7 @@
 
 import { Client } from 'whatsapp-web.js';
 import { io } from '../index.js';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 export class AuthHandler {
   private client: Client;
@@ -28,13 +29,13 @@ export class AuthHandler {
       console.log('[Gateway Auth] QR code received, broadcasting to clients...');
 
       // Broadcast QR code to all connected clients
-      io.emit('qr_code', {
+      io.emit(SOCKET_EVENTS.QR_CODE, {
         qr,
         timestamp: Date.now(),
       });
 
       // Also emit connection status
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'qr',
         timestamp: Date.now(),
       });
@@ -46,7 +47,7 @@ export class AuthHandler {
       this.isAuthenticated = true;
       this.qrCode = null;
 
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'authenticated',
         timestamp: Date.now(),
       });
@@ -57,7 +58,7 @@ export class AuthHandler {
       console.log('[Gateway Auth] WhatsApp client is ready');
       this.isAuthenticated = true;
 
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'ready',
         timestamp: Date.now(),
       });
@@ -68,7 +69,7 @@ export class AuthHandler {
       console.error('[Gateway Auth] Authentication failed:', message);
       this.isAuthenticated = false;
 
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'auth_failure',
         message,
         timestamp: Date.now(),
@@ -81,7 +82,7 @@ export class AuthHandler {
       this.isAuthenticated = false;
       this.qrCode = null;
 
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'disconnected',
         reason,
         timestamp: Date.now(),
@@ -92,7 +93,7 @@ export class AuthHandler {
     this.client.on('loading_screen', (percent: number, message: string) => {
       console.log(`[Gateway Auth] Loading: ${percent}% - ${message}`);
 
-      io.emit('loading_status', {
+      io.emit(SOCKET_EVENTS.LOADING_STATUS, {
         percent,
         message,
         timestamp: Date.now(),
@@ -135,7 +136,7 @@ export class AuthHandler {
       this.isAuthenticated = false;
       this.qrCode = null;
 
-      io.emit('connection_status', {
+      io.emit(SOCKET_EVENTS.CONNECTION_STATUS, {
         status: 'disconnected',
         reason: 'logout',
         timestamp: Date.now(),

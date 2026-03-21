@@ -140,6 +140,9 @@ export {
   updateContactTier,
 } from './pairing-ops.js';
 
+// Event name constants
+export { REDIS_EVENTS, SOCKET_EVENTS } from './events.js';
+
 // Document types (Personal Knowledge Upload)
 export type {
   DocumentCategory,

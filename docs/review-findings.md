@@ -25,12 +25,7 @@ Reviewers: 3 parallel agents (code reuse, code quality, efficiency)
 
 ## Remaining Issues
 
-| ID | Issue | Status |
-|----|-------|--------|
-| L2 | Event names as raw string literals across services (`'events:pause'`, `'message_received'`, etc.) | Deferred — low impact, high churn |
-| L9 | WHAT-not-WHY comments throughout the diff | Deferred — subjective, fix incrementally |
-
-All other issues have been resolved (see Completed Fixes above).
+All issues have been resolved.
 
 ## Recently Completed Fixes
 
@@ -49,3 +44,5 @@ All other issues have been resolved (see Completed Fixes above).
 | L8 | `embedBatch` skips cache check. | Added Redis `mget` cache lookup before API call; caches results after. |
 | L10 | Tier validation duplicated in 2 route handlers. | Extracted `isValidTier()` type guard to `frontend/src/lib/errors.ts`. |
 | L11 | `document-store.ts` duplicates batch-fetch-and-parse logic. | Extracted `fetchDocuments()` private method used by both `list()` and `listByStatus()`. |
+| L2 | Event names as raw string literals across services. | Created `REDIS_EVENTS` and `SOCKET_EVENTS` in `packages/shared-types/src/events.ts`. Replaced raw strings across 19 files (10 gateway, 1 orchestrator, 8 frontend). |
+| L9 | WHAT-not-WHY comments throughout the diff. | Removed ~40 redundant comments across 6 files. Kept JSDoc, section headers, and WHY explanations. |

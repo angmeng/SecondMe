@@ -13,7 +13,7 @@ import type {
   RateLimitCheckOptions,
 } from './types.js';
 import { DEFAULT_RATE_LIMITER_CONFIG } from './types.js';
-import { maskContactId } from '@secondme/shared-types';
+import { maskContactId, SOCKET_EVENTS, REDIS_EVENTS } from '@secondme/shared-types';
 
 /**
  * Lua script for atomic increment with TTL on first message.
@@ -180,7 +180,7 @@ export class RateLimiter {
 
       // Publish pause event to Redis pub/sub
       await this.deps.publish(
-        'events:pause',
+        REDIS_EVENTS.PAUSE,
         JSON.stringify({
           contactId,
           channelId,
@@ -194,7 +194,7 @@ export class RateLimiter {
       );
 
       // Emit to frontend via socket.io
-      this.deps.emitEvent('rate_limit', {
+      this.deps.emitEvent(SOCKET_EVENTS.RATE_LIMIT, {
         contactId,
         channelId,
         count,
@@ -246,7 +246,7 @@ export class RateLimiter {
       // Emit resume event if pause was cleared
       if (clearPause) {
         await this.deps.publish(
-          'events:pause',
+          REDIS_EVENTS.PAUSE,
           JSON.stringify({
             contactId,
             channelId,
@@ -256,7 +256,7 @@ export class RateLimiter {
           })
         );
 
-        this.deps.emitEvent('pause_update', {
+        this.deps.emitEvent(SOCKET_EVENTS.PAUSE_UPDATE, {
           contactId,
           channelId,
           action: 'resume',

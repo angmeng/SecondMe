@@ -82,7 +82,6 @@ export abstract class EmbeddingProvider {
    * Embed a single text string
    */
   async embed(text: string): Promise<EmbeddingResult> {
-    // Check cache first
     const cacheKey = this.getCacheKey(text);
 
     try {
@@ -99,22 +98,17 @@ export abstract class EmbeddingProvider {
       console.warn(`[${this.name}] Cache read error:`, error);
     }
 
-    // Check circuit breaker
     if (!this.checkCircuitBreaker()) {
       throw new Error(`${this.name} circuit breaker is open`);
     }
 
-    // Call provider API
     const startTime = Date.now();
     try {
       const result = await this.embedSingle(text);
       const latency = Date.now() - startTime;
       console.log(`[${this.name}] Embedding generated in ${latency}ms (${result.tokensUsed} tokens)`);
 
-      // Record success
       this.recordSuccess();
-
-      // Cache the embedding
       await this.cacheEmbedding(cacheKey, result.embedding);
 
       return result;
@@ -133,7 +127,6 @@ export abstract class EmbeddingProvider {
       return { embeddings: [], tokensUsed: 0 };
     }
 
-    // Check cache for each text first
     const cacheKeys = texts.map((t) => this.getCacheKey(t));
     let cachedValues: (string | null)[] = [];
     try {
@@ -165,7 +158,6 @@ export abstract class EmbeddingProvider {
       console.log(`[${this.name}] Batch cache: ${cacheHits}/${texts.length} hits`);
     }
 
-    // If everything was cached, return immediately without touching the API
     if (uncachedIndices.length === 0) {
       return {
         embeddings: resultEmbeddings as number[][],
@@ -173,7 +165,6 @@ export abstract class EmbeddingProvider {
       };
     }
 
-    // Check circuit breaker before hitting the API
     if (!this.checkCircuitBreaker()) {
       throw new Error(`${this.name} circuit breaker is open`);
     }
@@ -188,10 +179,8 @@ export abstract class EmbeddingProvider {
         `[${this.name}] Batch embedding of ${uncachedTexts.length} texts in ${latency}ms (${result.tokensUsed} tokens)`
       );
 
-      // Record success
       this.recordSuccess();
 
-      // Merge API results back into the full result array and cache them
       for (let j = 0; j < uncachedIndices.length; j++) {
         const originalIndex = uncachedIndices[j]!;
         const embedding = result.embeddings[j]!;

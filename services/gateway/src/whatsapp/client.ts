@@ -7,6 +7,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 type ClientType = InstanceType<typeof Client>;
 import { redisClient } from '../redis/client.js';
+import { REDIS_EVENTS } from '@secondme/shared-types';
 import path from 'path';
 
 class WhatsAppClient {
@@ -45,7 +46,7 @@ class WhatsAppClient {
       console.log('[Gateway WhatsApp] QR code received');
 
       // Publish to Redis pub/sub for distributed systems
-      redisClient.publish('events:qr', JSON.stringify({
+      redisClient.publish(REDIS_EVENTS.QR, JSON.stringify({
         qr,
         timestamp: Date.now(),
       })).catch((err: unknown) => console.error('[Gateway WhatsApp] Failed to publish QR:', err));
@@ -57,7 +58,7 @@ class WhatsAppClient {
       this.ready = true;
 
       // Publish to Redis for distributed systems
-      redisClient.publish('events:status', JSON.stringify({
+      redisClient.publish(REDIS_EVENTS.STATUS, JSON.stringify({
         service: 'gateway',
         status: 'connected',
         timestamp: Date.now(),
@@ -81,7 +82,7 @@ class WhatsAppClient {
       this.ready = false;
 
       // Publish to Redis for distributed systems
-      redisClient.publish('events:status', JSON.stringify({
+      redisClient.publish(REDIS_EVENTS.STATUS, JSON.stringify({
         service: 'gateway',
         status: 'disconnected',
         reason,

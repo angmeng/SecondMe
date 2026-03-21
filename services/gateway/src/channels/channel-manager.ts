@@ -16,6 +16,7 @@ import type {
   ChannelManagerConfig,
   ManagedChannelInfo,
 } from '@secondme/shared-types';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 import type { ChannelLogger } from './types.js';
 import { getErrorMessage } from './utils.js';
 
@@ -348,7 +349,7 @@ export class ChannelManager {
    */
   private emitStatusUpdate(): void {
     const status = this.getStatusSync();
-    this.deps.emitEvent('channel_manager_status', {
+    this.deps.emitEvent(SOCKET_EVENTS.CHANNEL_MANAGER_STATUS, {
       channels: status,
       timestamp: Date.now(),
     });

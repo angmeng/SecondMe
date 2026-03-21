@@ -34,6 +34,7 @@ import {
   getApprovedContact as sharedGetApprovedContact,
   revokeApproval as sharedRevokeApproval,
   updateContactTier as sharedUpdateContactTier,
+  REDIS_EVENTS,
 } from '@secondme/shared-types';
 
 const logger = createLogger('PairingStore');
@@ -68,22 +69,18 @@ const CREATE_PAIRING_SCRIPT = `
   local pendingKey = KEYS[3]
   local requestJson = ARGV[1]
 
-  -- Check if already approved
   if redis.call('EXISTS', approvedKey) == 1 then
     return {0, 'already_approved'}
   end
 
-  -- Check if denied (in cooldown)
   if redis.call('EXISTS', deniedKey) == 1 then
     return {0, 'denied_cooldown'}
   end
 
-  -- Check if already has pending request
   if redis.call('EXISTS', pendingKey) == 1 then
     return {0, 'already_pending'}
   end
 
-  -- Create pending request (no TTL - admin must approve/deny)
   redis.call('SET', pendingKey, requestJson)
 
   return {1, 'created'}
@@ -98,10 +95,7 @@ const APPROVE_CONTACT_SCRIPT = `
   local pendingKey = KEYS[2]
   local approvedJson = ARGV[1]
 
-  -- Set approved (no TTL - permanent)
   redis.call('SET', approvedKey, approvedJson)
-
-  -- Delete pending
   redis.call('DEL', pendingKey)
 
   return 1
@@ -117,10 +111,7 @@ const DENY_CONTACT_SCRIPT = `
   local deniedJson = ARGV[1]
   local ttlSeconds = tonumber(ARGV[2])
 
-  -- Set denied with TTL
   redis.call('SET', deniedKey, deniedJson, 'EX', ttlSeconds)
-
-  -- Delete pending
   redis.call('DEL', pendingKey)
 
   return 1
@@ -308,7 +299,7 @@ class PairingStore {
 
     // Publish event for real-time updates
     await redisClient.publish(
-      'events:pairing',
+      REDIS_EVENTS.PAIRING,
       JSON.stringify({
         action: 'approved',
         contactId,
@@ -356,7 +347,7 @@ class PairingStore {
 
     // Publish event
     await redisClient.publish(
-      'events:pairing',
+      REDIS_EVENTS.PAIRING,
       JSON.stringify({
         action: 'denied',
         contactId,
@@ -379,7 +370,7 @@ class PairingStore {
 
     // Publish event
     await redisClient.publish(
-      'events:pairing',
+      REDIS_EVENTS.PAIRING,
       JSON.stringify({
         action: 'revoked',
         contactId,

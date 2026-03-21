@@ -58,19 +58,10 @@ class DocumentStore {
     // Use pipeline for atomic operations
     const pipeline = client.pipeline();
 
-    // Store metadata
     pipeline.set(KEYS.metadata(document.id), JSON.stringify(fullDocument));
-
-    // Add to sorted set (score = uploadedAt for chronological ordering)
     pipeline.zadd(KEYS.list, document.uploadedAt, document.id);
-
-    // Add to category set
     pipeline.sadd(KEYS.category(document.category), document.id);
-
-    // Add to status index (for efficient status queries)
     pipeline.sadd(KEYS.status('pending'), document.id);
-
-    // Queue for processing via XADD
     pipeline.xadd(KEYS.queue, '*', 'data', JSON.stringify(queuedDocument));
 
     await pipeline.exec();
@@ -123,11 +114,9 @@ class DocumentStore {
     let documentIds: string[];
 
     if (options?.category) {
-      // Get IDs from category set, then sort by uploadedAt
       const categoryIds = await client.smembers(KEYS.category(options.category));
       if (categoryIds.length === 0) return [];
 
-      // Get scores (uploadedAt) for sorting
       const scores = await client.zmscore(KEYS.list, categoryIds);
       const idsWithScores = categoryIds
         .map((id, i) => {
@@ -139,7 +128,6 @@ class DocumentStore {
 
       documentIds = idsWithScores.slice(offset, offset + limit).map((item) => item.id);
     } else {
-      // Get from sorted set directly (ZREVRANGE for newest first)
       documentIds = await client.zrevrange(KEYS.list, offset, offset + limit - 1);
     }
 
@@ -180,11 +168,10 @@ class DocumentStore {
       ...(details?.processedAt !== undefined && { processedAt: details.processedAt }),
     };
 
-    // Use pipeline to update metadata and status index atomically
+    // Use pipeline for atomic operations
     const pipeline = client.pipeline();
     pipeline.set(KEYS.metadata(id), JSON.stringify(updated));
 
-    // Move document between status sets if status changed
     if (oldStatus !== status) {
       pipeline.srem(KEYS.status(oldStatus), id);
       pipeline.sadd(KEYS.status(status), id);
@@ -212,16 +199,9 @@ class DocumentStore {
 
     const pipeline = client.pipeline();
 
-    // Remove metadata
     pipeline.del(KEYS.metadata(id));
-
-    // Remove from sorted set
     pipeline.zrem(KEYS.list, id);
-
-    // Remove from category set
     pipeline.srem(KEYS.category(document.category), id);
-
-    // Remove from status index
     pipeline.srem(KEYS.status(document.status), id);
 
     await pipeline.exec();
@@ -258,12 +238,10 @@ class DocumentStore {
   async listByStatus(status: DocumentStatus, limit = 100): Promise<UploadedDocument[]> {
     const client = redisClient.client;
 
-    // Get document IDs from status index
     const documentIds = await client.smembers(KEYS.status(status));
 
     if (documentIds.length === 0) return [];
 
-    // Get scores (uploadedAt) for sorting
     const scores = await client.zmscore(KEYS.list, documentIds);
     const idsWithScores = documentIds
       .map((id, i) => {

@@ -13,7 +13,7 @@
  */
 
 import type { ChannelMessage, ChannelId, ContactTier, DownloadedMedia } from '@secondme/shared-types';
-import { extractPhoneFromContactId, maskContactId } from '@secondme/shared-types';
+import { extractPhoneFromContactId, maskContactId, SOCKET_EVENTS, REDIS_EVENTS } from '@secondme/shared-types';
 import { DEFAULT_MEDIA_LIMITS } from '@secondme/shared-types';
 import type { StoredMessage } from '../redis/history-store.js';
 import type { RateLimiter } from './rate-limiter.js';
@@ -176,7 +176,6 @@ export class GatewayMessageProcessor {
       channelId,
     });
 
-    // STEP 0: Auto-link contact if we have a phone number
     if (normalizedContactId && this.deps.contactLinker) {
       try {
         await this.deps.contactLinker.linkContact(
@@ -197,10 +196,8 @@ export class GatewayMessageProcessor {
       }
     }
 
-    // STEP 1: Pairing gate - check if contact is approved
     let isApproved = await this.deps.pairingStore.isApproved(contactId);
 
-    // STEP 1b: If not approved, check if any linked contact is approved
     if (!isApproved && this.deps.contactLinker) {
       const linkedResult = await this.deps.contactLinker.isApprovedAcrossChannels(
         contactId,
@@ -252,7 +249,6 @@ export class GatewayMessageProcessor {
   ): Promise<ProcessResult> {
     const { contactId, content, id: messageId, timestamp, channelId } = message;
 
-    // STEP 2: Store in history (only for approved contacts)
     await this.deps.historyStore.addMessage(contactId, {
       id: messageId,
       role: 'user',
@@ -261,7 +257,6 @@ export class GatewayMessageProcessor {
       type: 'incoming',
     });
 
-    // STEP 3: Check pause state
     const isPaused = await this.deps.redisClient.isPaused(contactId);
     if (isPaused) {
       this.deps.logger.info(`Contact ${maskContactId(contactId)} is paused, skipping`, {
@@ -271,7 +266,6 @@ export class GatewayMessageProcessor {
       return { processed: true, reason: 'paused', ...(autoApproved && { autoApproved: true }) };
     }
 
-    // STEP 4: Rate limit check
     const rateLimitResult = await this.deps.rateLimiter.check(contactId, { channelId });
     if (!rateLimitResult.allowed) {
       this.deps.logger.info(
@@ -290,7 +284,6 @@ export class GatewayMessageProcessor {
       };
     }
 
-    // STEP 5: Download media if present (Phase 4)
     let mediaBase64: string | undefined;
     let mediaMimeType: string | undefined;
 
@@ -349,7 +342,6 @@ export class GatewayMessageProcessor {
       }
     }
 
-    // STEP 6: Queue for orchestrator
     // Build payload with only defined optional fields (exactOptionalPropertyTypes compliance)
     const messagePayload: Parameters<RedisClientInterface['queueMessage']>[0] = {
       messageId,
@@ -378,7 +370,7 @@ export class GatewayMessageProcessor {
     });
 
     // Emit event for real-time monitoring
-    this.deps.emitEvent('message_received', {
+    this.deps.emitEvent(SOCKET_EVENTS.MESSAGE_RECEIVED, {
       channelId,
       contactId,
       contactName: contactName || 'Unknown',
@@ -414,7 +406,6 @@ export class GatewayMessageProcessor {
       channelId,
     });
 
-    // Store user's manual message in conversation history
     await this.deps.historyStore.addMessage(contactId, {
       id: messageId,
       role: 'assistant',
@@ -423,7 +414,6 @@ export class GatewayMessageProcessor {
       type: 'fromMe',
     });
 
-    // Auto-pause bot for this contact (indefinite - no TTL)
     const pausedAt = Date.now();
 
     await this.deps.redisClient.client.set(
@@ -433,7 +423,7 @@ export class GatewayMessageProcessor {
 
     // Publish pause event
     await this.deps.redisClient.publish(
-      'events:pause',
+      REDIS_EVENTS.PAUSE,
       JSON.stringify({
         contactId,
         channelId,
@@ -454,7 +444,7 @@ export class GatewayMessageProcessor {
     );
 
     // Emit to frontend for real-time UI update
-    this.deps.emitEvent('pause_update', {
+    this.deps.emitEvent(SOCKET_EVENTS.PAUSE_UPDATE, {
       channelId,
       contactId,
       action: 'pause',
@@ -478,7 +468,6 @@ export class GatewayMessageProcessor {
   ): Promise<ProcessResult> {
     const { contactId, content, channelId } = message;
 
-    // Check if denied (cooling off period)
     const isDenied = await this.deps.pairingStore.isDenied(contactId);
     if (isDenied) {
       this.deps.logger.info(`Contact ${maskContactId(contactId)} is denied, ignoring`, {
@@ -527,7 +516,7 @@ export class GatewayMessageProcessor {
       });
 
       // Emit pairing request event for real-time dashboard update
-      this.deps.emitEvent('pairing_request', {
+      this.deps.emitEvent(SOCKET_EVENTS.PAIRING_REQUEST, {
         channelId,
         contactId,
         displayName: contactName,

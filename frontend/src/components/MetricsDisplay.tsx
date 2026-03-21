@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { socketClient } from '@/lib/socket';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 interface Metrics {
   messagesReceived: number;
@@ -48,13 +49,13 @@ export default function MetricsDisplay({ className = '', compact = false }: Prop
       setLastUpdate(new Date());
     };
 
-    socket.on('metrics_update', handleMetricsUpdate);
+    socket.on(SOCKET_EVENTS.METRICS_UPDATE, handleMetricsUpdate);
 
     // Refresh metrics periodically
     const interval = setInterval(fetchMetrics, 30000); // Every 30 seconds
 
     return () => {
-      socket.off('metrics_update', handleMetricsUpdate);
+      socket.off(SOCKET_EVENTS.METRICS_UPDATE, handleMetricsUpdate);
       clearInterval(interval);
     };
   }, []);

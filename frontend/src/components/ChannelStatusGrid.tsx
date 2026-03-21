@@ -10,6 +10,7 @@ import ChannelStatusCard from './ChannelStatusCard';
 import { socketClient } from '@/lib/socket';
 import { useToast } from '@/contexts/ToastContext';
 import type { ManagedChannelInfo } from '@secondme/shared-types';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 export default function ChannelStatusGrid() {
   const [channels, setChannels] = useState<ManagedChannelInfo[]>([]);
@@ -47,10 +48,10 @@ export default function ChannelStatusGrid() {
       setError(null); // Clear any previous errors on successful update
     };
 
-    socket.on('channel_manager_status', handleStatus);
+    socket.on(SOCKET_EVENTS.CHANNEL_MANAGER_STATUS, handleStatus);
 
     return () => {
-      socket.off('channel_manager_status', handleStatus);
+      socket.off(SOCKET_EVENTS.CHANNEL_MANAGER_STATUS, handleStatus);
     };
   }, []);
 

@@ -4,6 +4,7 @@
  */
 
 import { redisClient } from '../redis/client.js';
+import { REDIS_EVENTS } from '@secondme/shared-types';
 
 export interface SystemMetrics {
   messagesReceived: number;
@@ -246,7 +247,7 @@ class MetricsCollector {
   async publishMetrics(): Promise<void> {
     const metrics = await this.getMetrics();
 
-    await redisClient.publish('metrics:system', JSON.stringify({
+    await redisClient.publish(REDIS_EVENTS.METRICS_SYSTEM, JSON.stringify({
       type: 'metrics_update',
       data: metrics,
       timestamp: Date.now(),

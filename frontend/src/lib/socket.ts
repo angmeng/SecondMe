@@ -4,6 +4,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:3001';
 
@@ -74,7 +75,7 @@ class SocketClient {
     });
 
     // Cache connection status for components that mount after the event was emitted
-    this.socket.on('connection_status', (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => {
+    this.socket.on(SOCKET_EVENTS.CONNECTION_STATUS, (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => {
       this.lastConnectionStatus = data.status;
     });
   }
@@ -84,7 +85,7 @@ class SocketClient {
    */
   onQRCode(callback: (data: { qr: string; timestamp: number }) => void): void {
     const socket = this.getSocket();
-    socket.on('qr_code', callback);
+    socket.on(SOCKET_EVENTS.QR_CODE, callback);
   }
 
   /**
@@ -99,7 +100,7 @@ class SocketClient {
     }) => void
   ): void {
     const socket = this.getSocket();
-    socket.on('pause_update', callback);
+    socket.on(SOCKET_EVENTS.PAUSE_UPDATE, callback);
   }
 
   /**
@@ -109,7 +110,7 @@ class SocketClient {
     callback: (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => void
   ): void {
     const socket = this.getSocket();
-    socket.on('connection_status', callback);
+    socket.on(SOCKET_EVENTS.CONNECTION_STATUS, callback);
   }
 
   /**
@@ -123,14 +124,14 @@ class SocketClient {
     }) => void
   ): void {
     const socket = this.getSocket();
-    socket.on('message_status', callback);
+    socket.on(SOCKET_EVENTS.MESSAGE_STATUS, callback);
   }
 
   /**
    * Unsubscribe from QR code updates
    */
   offQRCode(callback: (data: { qr: string; timestamp: number }) => void): void {
-    this.socket?.off('qr_code', callback);
+    this.socket?.off(SOCKET_EVENTS.QR_CODE, callback);
   }
 
   /**
@@ -144,7 +145,7 @@ class SocketClient {
       expiresAt?: number;
     }) => void
   ): void {
-    this.socket?.off('pause_update', callback);
+    this.socket?.off(SOCKET_EVENTS.PAUSE_UPDATE, callback);
   }
 
   /**
@@ -153,7 +154,7 @@ class SocketClient {
   offConnectionStatus(
     callback: (data: { status: 'connected' | 'disconnected' | 'qr' | 'ready' }) => void
   ): void {
-    this.socket?.off('connection_status', callback);
+    this.socket?.off(SOCKET_EVENTS.CONNECTION_STATUS, callback);
   }
 
   /**
@@ -166,7 +167,7 @@ class SocketClient {
       timestamp: number;
     }) => void
   ): void {
-    this.socket?.off('message_status', callback);
+    this.socket?.off(SOCKET_EVENTS.MESSAGE_STATUS, callback);
   }
 
   /**

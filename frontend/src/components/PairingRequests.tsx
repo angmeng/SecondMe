@@ -18,6 +18,7 @@ import Avatar from '@/components/ui/Avatar';
 import ChannelBadge from '@/components/ui/ChannelBadge';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import type { PairingRequest, ContactTier } from '@secondme/shared-types';
+import { SOCKET_EVENTS } from '@secondme/shared-types';
 
 interface PairingRequestsProps {
   onRequestProcessed?: () => void;
@@ -57,12 +58,12 @@ export default function PairingRequests({ onRequestProcessed }: PairingRequestsP
 
     // Subscribe to socket events
     const socket = socketClient.getSocket();
-    socket.on('pairing_request', handlePairingRequest);
-    socket.on('pairing_approved', handlePairingApproved);
+    socket.on(SOCKET_EVENTS.PAIRING_REQUEST, handlePairingRequest);
+    socket.on(SOCKET_EVENTS.PAIRING_APPROVED, handlePairingApproved);
 
     return () => {
-      socket.off('pairing_request', handlePairingRequest);
-      socket.off('pairing_approved', handlePairingApproved);
+      socket.off(SOCKET_EVENTS.PAIRING_REQUEST, handlePairingRequest);
+      socket.off(SOCKET_EVENTS.PAIRING_APPROVED, handlePairingApproved);
     };
   }, []);
 

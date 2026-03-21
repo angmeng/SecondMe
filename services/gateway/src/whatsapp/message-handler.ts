@@ -14,6 +14,7 @@ import { redisClient } from '../redis/client.js';
 import { historyStore } from '../redis/history-store.js';
 import { pairingStore } from '../redis/pairing-store.js';
 import { io } from '../index.js';
+import { SOCKET_EVENTS, REDIS_EVENTS } from '@secondme/shared-types';
 import type { MessageSender } from './sender.js';
 
 export class MessageHandler {
@@ -123,7 +124,7 @@ export class MessageHandler {
     console.log(`[Gateway MessageHandler] Message queued for processing: ${message.id._serialized}`);
 
     // Emit event for real-time monitoring
-    io.emit('message_received', {
+    io.emit(SOCKET_EVENTS.MESSAGE_RECEIVED, {
       contactId,
       contactName,
       timestamp,
@@ -162,7 +163,7 @@ export class MessageHandler {
 
     // Publish pause event
     await redisClient.publish(
-      'events:pause',
+      REDIS_EVENTS.PAUSE,
       JSON.stringify({
         contactId,
         action: 'pause',
@@ -177,7 +178,7 @@ export class MessageHandler {
     );
 
     // Emit to frontend for real-time UI update
-    io.emit('pause_update', {
+    io.emit(SOCKET_EVENTS.PAUSE_UPDATE, {
       contactId,
       action: 'pause',
       reason: 'fromMe',
@@ -247,7 +248,7 @@ export class MessageHandler {
       console.log(`[Gateway MessageHandler] Created pending request for ${contactId}`);
 
       // Emit pairing request event for real-time dashboard update
-      io.emit('pairing_request', {
+      io.emit(SOCKET_EVENTS.PAIRING_REQUEST, {
         contactId,
         displayName,
         phoneNumber,
@@ -330,7 +331,7 @@ export class MessageHandler {
     console.log(`[Gateway MessageHandler] Message queued for processing: ${message.id._serialized}`);
 
     // Emit event for real-time monitoring
-    io.emit('message_received', {
+    io.emit(SOCKET_EVENTS.MESSAGE_RECEIVED, {
       contactId,
       contactName,
       timestamp,
@@ -384,7 +385,7 @@ export class MessageHandler {
 
         // Publish rate limit event
         await redisClient.publish(
-          'events:pause',
+          REDIS_EVENTS.PAUSE,
           JSON.stringify({
             contactId,
             action: 'pause',
@@ -397,7 +398,7 @@ export class MessageHandler {
         );
 
         // Emit to frontend
-        io.emit('rate_limit', {
+        io.emit(SOCKET_EVENTS.RATE_LIMIT, {
           contactId,
           count,
           threshold,
